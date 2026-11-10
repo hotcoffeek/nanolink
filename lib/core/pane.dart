@@ -37,6 +37,8 @@ class PaneController extends ChangeNotifier {
   bool loading = false;
   String? error;
   bool grid = false;
+  bool homeEnabled = false; // показывать стартовый экран с плитками
+  bool home = false;
   bool pickMode = false; // в режиме выбора тап по файлу выделяет его
   String sort = 'name';
   bool asc = true;
@@ -66,6 +68,7 @@ class PaneController extends ChangeNotifier {
     dev = d;
     cat = null;
     filter = null;
+    home = homeEnabled;
     _catCache.clear();
     albums = const [];
     entries = const [];
@@ -132,6 +135,7 @@ class PaneController extends ChangeNotifier {
 
   Future<void> cd(String p, {bool keepFilter = false}) async {
     if (vfs == null) return;
+    home = false;
     path = p;
     if (!keepFilter) filter = null;
     cat = keepFilter ? cat : null;
@@ -156,7 +160,16 @@ class PaneController extends ChangeNotifier {
 
   final Map<Cat, List<Album>> _catCache = {};
 
+  void goHome() {
+    home = true;
+    cat = null;
+    filter = null;
+    selected.clear();
+    notifyListeners();
+  }
+
   Future<void> openCategory(Cat c, {bool force = false}) async {
+    home = false;
     cat = c;
     filter = catExt[c];
     selected.clear();
@@ -168,7 +181,9 @@ class PaneController extends ChangeNotifier {
     try {
       final List<Album> l;
       final v = vfs;
-      if (isLocal || v == null) {
+      if (v == null) {
+        l = const <Album>[];
+      } else if (isLocal) {
         l = await scanCategory(c, onProgress: (n) {
           catFound = n;
           notifyListeners();
@@ -202,6 +217,7 @@ class PaneController extends ChangeNotifier {
   }
 
   Future<void> openAlbum(Album a) async {
+    home = false;
     final c = cat;
     cat = null; // показываем обычный список, но с фильтром по расширению
     filter = c == null ? null : catExt[c];

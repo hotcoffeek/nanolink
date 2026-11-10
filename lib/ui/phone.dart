@@ -14,6 +14,7 @@ import '../core/platform.dart';
 import '../core/state.dart';
 import '../core/util.dart';
 import 'dialogs.dart';
+import 'folder_pick.dart';
 import 'pane_view.dart';
 import 'painters.dart';
 import 'settings_page.dart';
@@ -249,6 +250,22 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
               const SizedBox(height: 8),
               Center(child: Switch(value: s.settings.serverOn, onChanged: s.setServerOn)),
               const SizedBox(height: 18),
+              if (s.devices.any((d) => !d.isSelf && d.online)) ...[
+                Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+                  for (final d in s.sortedDevices.where((d) => !d.isSelf && d.online))
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(color: t.surface2, borderRadius: BorderRadius.circular(14), border: Border.all(color: d.has('nano') ? t.accent.withValues(alpha: 0.7) : t.border)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(kindIcon(d.kind), size: 16, color: t.accent2),
+                        const SizedBox(width: 6),
+                        Text(d.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                        if (d.has('nano')) ...[const SizedBox(width: 6), Icon(Icons.bolt_rounded, size: 14, color: t.accent2)],
+                      ]),
+                    ),
+                ]),
+                const SizedBox(height: 18),
+              ],
               if (s.incoming.isNotEmpty) ...[
                 Text(tr('ПОЛУЧАЮ', 'RECEIVING'), style: TextStyle(color: t.muted, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 0.9)),
                 const SizedBox(height: 8),
@@ -462,6 +479,37 @@ class SendPageState extends State<SendPage> {
     }
     final items = List<FsEntry>.from(_sel);
     if (!d.has('nano')) {
+      await _browse(d, send: items);
+      return;
+    }
+    final t = NlScope.of(context);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: t.surface2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (sheet) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+            child: Align(alignment: Alignment.centerLeft, child: Text(tr('Куда сохранить на «${d.title}»?', 'Where to save on "${d.title}"?'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+          ),
+          ListTile(
+            leading: Icon(Icons.folder_open_rounded, color: t.accent2),
+            title: Text(tr('Выбрать папку…', 'Choose a folder…')),
+            subtitle: Text(tr('Откроется список папок устройства', "Opens the device's folders")),
+            onTap: () => Navigator.pop(sheet, 'pick'),
+          ),
+          ListTile(
+            leading: Icon(Icons.bolt_rounded, color: t.accent2),
+            title: Text(tr('Быстро: Загрузки/NanoLink', 'Quick: Downloads/NanoLink')),
+            onTap: () => Navigator.pop(sheet, 'quick'),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'pick') {
       await _browse(d, send: items);
       return;
     }
@@ -840,6 +888,7 @@ class _PickerPageState extends State<PickerPage> {
   void initState() {
     super.initState();
     pane.pickMode = true;
+    pane.homeEnabled = widget.kind == PickKind.files;
     pane.grid = widget.kind == PickKind.photos || widget.kind == PickKind.videos;
     pane.attach(LocalVfs(), () => LocalVfs(), null).then((_) {
       if (!mounted) return;
@@ -933,7 +982,7 @@ class BrowsePage extends StatefulWidget {
 }
 
 class _BrowsePageState extends State<BrowsePage> {
-  late final PaneController pane = PaneController('br${widget.device.id}');
+  late final PaneController pane = PaneController('br${widget.device.id}')..homeEnabled = true;
 
   @override
   void initState() {
@@ -977,7 +1026,41 @@ class _BrowsePageState extends State<BrowsePage> {
     final s = AppScope.of(context);
     final items = pane.selectedEntries;
     if (items.isEmpty) return;
-    final dir = await s.localInbox();
+    final t = NlScope.of(context);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: t.surface2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (sheet) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+            child: Align(alignment: Alignment.centerLeft, child: Text(tr('Куда сохранить на этом устройстве?', 'Where to save on this device?'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+          ),
+          ListTile(
+            leading: Icon(Icons.folder_open_rounded, color: t.accent2),
+            title: Text(tr('Выбрать папку…', 'Choose a folder…')),
+            onTap: () => Navigator.pop(sheet, 'pick'),
+          ),
+          ListTile(
+            leading: Icon(Icons.bolt_rounded, color: t.accent2),
+            title: Text(tr('Быстро: папка приёма', 'Quick: receive folder')),
+            subtitle: Text(s.settings.inboxDir.isEmpty ? 'Загрузки/NanoLink' : s.settings.inboxDir),
+            onTap: () => Navigator.pop(sheet, 'quick'),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    String dir;
+    if (choice == 'pick') {
+      final r = await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => FolderPickPage(title: tr('Куда скачать', 'Where to download'))));
+      if (r == null) return;
+      dir = r;
+    } else {
+      dir = await s.localInbox();
+    }
     s.transfers.enqueue(
       srcFactory: pane.factory!,
       dstFactory: () => LocalVfs(),
@@ -989,7 +1072,7 @@ class _BrowsePageState extends State<BrowsePage> {
       conflict: s.settings.conflict,
     );
     pane.clearSelection();
-    if (mounted) toast(context, tr('Скачиваем в «Загрузки/NanoLink» - смотрите вкладку «Передачи»', 'Downloading to Downloads/NanoLink - see the Transfers tab'));
+    if (mounted) toast(context, tr('Скачиваем в $dir - смотрите вкладку «Передачи»', 'Downloading to $dir - see the Transfers tab'));
   }
 
   @override
@@ -1005,8 +1088,12 @@ class _BrowsePageState extends State<BrowsePage> {
           listenable: pane,
           builder: (_, __) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(widget.device.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-            if (pane.attached && pane.error == null && pane.entries.isNotEmpty)
-              Text(tr('Подключено', 'Connected'), style: const TextStyle(color: Color(0xFF3DDC84), fontSize: 11.5, fontWeight: FontWeight.w700)),
+            Text(
+              pane.attached && pane.error == null && pane.entries.isNotEmpty
+                  ? tr('Файлы этого устройства · подключено', "This device's files · connected")
+                  : tr('Файлы этого устройства', "This device's files"),
+              style: TextStyle(color: pane.attached && pane.error == null && pane.entries.isNotEmpty ? const Color(0xFF3DDC84) : NlScope.of(context).muted, fontSize: 11.5, fontWeight: FontWeight.w700),
+            ),
           ]),
         ),
         actions: [
@@ -1034,7 +1121,7 @@ class _BrowsePageState extends State<BrowsePage> {
                   child: GradientButton(
                     label: tr('Отправить сюда · ${send.length}', 'Send here · ${send.length}'),
                     icon: Icons.send_rounded,
-                    onTap: pane.attached ? _sendHere : null,
+                    onTap: pane.attached && !pane.home ? _sendHere : null,
                   ),
                 ),
               ),
@@ -1064,7 +1151,7 @@ class _BrowsePageState extends State<BrowsePage> {
                 ),
                 IconBtn(icon: Icons.close_rounded, tip: tr('Снять выбор', 'Clear'), onTap: pane.clearSelection),
                 const SizedBox(width: 4),
-                GradientButton(compact: true, label: tr('Скачать', 'Download'), icon: Icons.download_rounded, onTap: _download),
+                GradientButton(compact: true, label: tr('Скачать на телефон', 'Download to phone'), icon: Icons.download_rounded, onTap: _download),
               ]),
             ),
           );

@@ -46,6 +46,7 @@ class Settings {
   bool serverOn = true;
   bool autoPair = true;
   bool askReceive = false;
+  String inboxDir = '';
 
   Map<String, dynamic> toJson() => {
         'theme': theme,
@@ -57,6 +58,7 @@ class Settings {
         'serverOn': serverOn,
         'autoPair': autoPair,
         'askReceive': askReceive,
+        'inboxDir': inboxDir,
       };
 
   void apply(Map<String, dynamic> j) {
@@ -69,5 +71,6 @@ class Settings {
     serverOn = (j['serverOn'] ?? serverOn) as bool;
     autoPair = (j['autoPair'] ?? autoPair) as bool;
     askReceive = (j['askReceive'] ?? askReceive) as bool;
+    inboxDir = (j['inboxDir'] ?? inboxDir).toString();
   }
 }

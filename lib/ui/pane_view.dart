@@ -14,6 +14,7 @@ import '../core/state.dart';
 import '../core/thumbs.dart';
 import '../core/util.dart';
 import 'dialogs.dart';
+import 'explorer_home.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -210,7 +211,8 @@ class _PathBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(6, 0, 6, 0),
       child: Row(children: [
-        IconBtn(icon: Icons.arrow_upward_rounded, tip: tr('Вверх', 'Up'), onTap: pane.canGoUp ? pane.up : null),
+        if (pane.homeEnabled) IconBtn(icon: Icons.home_rounded, tip: tr('Главная', 'Home'), active: pane.home, onTap: pane.goHome),
+        IconBtn(icon: Icons.arrow_upward_rounded, tip: tr('Вверх', 'Up'), onTap: pane.canGoUp && !pane.home ? pane.up : null),
         Expanded(
           child: LayoutBuilder(
             builder: (context, c) => SingleChildScrollView(
@@ -219,6 +221,8 @@ class _PathBar extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: BoxConstraints(minWidth: c.maxWidth),
                 child: Row(children: [
+                  if (pane.home) Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), child: Text(tr('Главная', 'Home'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800))),
+                  if (!pane.home)
                   for (var i = 0; i < crumbs.length; i++) ...[
                     if (i > 0) Icon(Icons.chevron_right_rounded, size: 16, color: t.muted),
                     InkWell(
@@ -255,7 +259,7 @@ class _Strip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!pane.attached) return const SizedBox.shrink();
+    if (!pane.attached || pane.home) return const SizedBox.shrink();
     final chips = <Widget>[];
     if (!hideCats) {
       chips.add(_StripChip(
@@ -317,6 +321,7 @@ class _Body extends StatelessWidget {
     final s = AppScope.of(context);
     if (!pane.attached) return _Placeholder(pane: pane);
     if (pane.error != null && pane.entries.isEmpty) return _ErrorView(pane: pane);
+    if (pane.home && pane.cat == null) return ExplorerHome(pane: pane);
     if (pane.cat != null) return _Albums(pane: pane);
     final list = pane.view;
     if (list.isEmpty && !pane.loading) {
@@ -335,7 +340,7 @@ class _Body extends StatelessWidget {
       return ListView.builder(
         padding: const EdgeInsets.only(bottom: 8),
         itemCount: list.length,
-        itemExtent: 52,
+        itemExtent: 64,
         itemBuilder: (_, i) => _wrapDrag(context, s, t, pane, list[i], _RowTile(pane: pane, e: list[i], cols: cols)),
       );
     });
@@ -438,43 +443,86 @@ class _RowTile extends StatelessWidget {
     final t = NlScope.of(context);
     final sel = pane.selected.contains(e.path);
     final st = fileStyle(e);
+    final big = e.isDir;
     return InkWell(
       onTap: () => _tapEntry(context, pane, e),
       onLongPress: () => pane.toggle(e),
       onSecondaryTap: () => pane.toggle(e),
       child: Container(
         color: sel ? t.accent.withValues(alpha: 0.14) : Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         child: Row(children: [
-          const SizedBox(width: 6),
           SizedBox(
-            width: 40,
-            height: 40,
+            width: 50,
+            height: 50,
             child: Stack(clipBehavior: Clip.none, children: [
-              Center(child: _thumb(pane, e, 36, st)),
-              if (sel) Positioned(right: -4, bottom: -4, child: Icon(Icons.check_circle_rounded, size: 19, color: t.accent2)),
+              Center(
+                child: big
+                    ? Icon(Icons.folder_rounded, size: 46, color: st.color, shadows: [Shadow(color: st.color.withValues(alpha: 0.5), blurRadius: 10)])
+                    : _thumb(pane, e, 42, st),
+              ),
+              if (sel) Positioned(right: -2, bottom: -2, child: Icon(Icons.check_circle_rounded, size: 20, color: t.accent2)),
             ]),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-              if (!cols)
-                Text(
-                  e.isDir ? fmtDate(e.modified) : '${fmtSize(e.size)}  ${fmtDate(e.modified)}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11.5, color: t.muted),
-                ),
+              Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, height: 1.15)),
+              const SizedBox(height: 2),
+              e.isDir
+                  ? _FolderSub(pane: pane, e: e)
+                  : Text(fmtSize(e.size), maxLines: 1, style: TextStyle(fontSize: 12.5, color: t.muted)),
             ]),
           ),
-          if (cols) ...[
-            SizedBox(width: 82, child: Text(e.isDir ? '' : fmtSize(e.size), textAlign: TextAlign.right, style: TextStyle(fontSize: 12.5, color: t.muted))),
-            SizedBox(width: 128, child: Text(fmtDate(e.modified), textAlign: TextAlign.right, style: TextStyle(fontSize: 12.5, color: t.muted))),
-          ],
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
+          SizedBox(width: 84, child: Text(fmtDate(e.modified), textAlign: TextAlign.right, maxLines: 2, style: TextStyle(fontSize: 12, color: t.muted))),
         ]),
       ),
+    );
+  }
+}
+
+String _objects(int n) {
+  final m10 = n % 10, m100 = n % 100;
+  if (m10 == 1 && m100 != 11) return tr('$n объект', '$n item');
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return tr('$n объекта', '$n items');
+  return tr('$n объектов', '$n items');
+}
+
+final Map<String, int> _countCache = {};
+
+/// Подпись папки: число объектов (считаем только на этом устройстве, лениво).
+class _FolderSub extends StatelessWidget {
+  final PaneController pane;
+  final FsEntry e;
+  const _FolderSub({required this.pane, required this.e});
+
+  Future<int> _count() async {
+    final c = _countCache[e.path];
+    if (c != null) return c;
+    var n = 0;
+    try {
+      await for (final _ in Directory(e.path).list(followLinks: false)) {
+        if (++n >= 9999) break;
+      }
+    } catch (_) {
+      n = -1;
+    }
+    _countCache[e.path] = n;
+    return n;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    final style = TextStyle(fontSize: 12.5, color: t.muted);
+    if (!pane.isLocal) return Text(tr('Папка', 'Folder'), style: style);
+    return FutureBuilder<int>(
+      future: _count(),
+      builder: (_, snap) {
+        final n = snap.data;
+        return Text(n == null || n < 0 ? ' ' : _objects(n), maxLines: 1, style: style);
+      },
     );
   }
 }

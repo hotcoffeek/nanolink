@@ -207,6 +207,10 @@ class MainActivity : FlutterActivity() {
                         nm.notify(id, b.build())
                         result.success(true)
                     }
+                    "storageStats" -> {
+                        val st = android.os.StatFs(Environment.getExternalStorageDirectory().absolutePath)
+                        result.success(arrayListOf(st.totalBytes, st.availableBytes))
+                    }
                     "takeShared" -> {
                         val l = ArrayList(pending)
                         pending.clear()

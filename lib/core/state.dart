@@ -371,6 +371,12 @@ class AppState extends ChangeNotifier implements Hub {
   /// Папка, куда складываются принятые/скачанные файлы на этом устройстве.
   Future<String> localInbox() async {
     final v = LocalVfs();
+    if (settings.inboxDir.isNotEmpty) {
+      try {
+        await v.mkdir(settings.inboxDir);
+      } catch (_) {}
+      return settings.inboxDir;
+    }
     String base = '';
     try {
       for (final p in await v.places()) {
@@ -647,6 +653,12 @@ class AppState extends ChangeNotifier implements Hub {
     final w = _recvQ.removeAt(0);
     if (ok) _recvOk[w.req.id] = DateTime.now();
     if (!w.done.isCompleted) w.done.complete(ok);
+    notifyListeners();
+  }
+
+  void setInboxDir(String d) {
+    settings.inboxDir = d;
+    saveSoon();
     notifyListeners();
   }
 

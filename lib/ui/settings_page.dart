@@ -7,6 +7,7 @@ import '../core/platform.dart';
 import '../core/state.dart';
 import '../core/util.dart';
 import 'dialogs.dart';
+import 'folder_pick.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -91,6 +92,17 @@ class SettingsPage extends StatelessWidget {
                 title: 'ANDROID',
                 t: t,
                 child: Column(children: [
+                  _Row(
+                    title: tr('Папка для принятых файлов', 'Folder for received files'),
+                    subtitle: s.settings.inboxDir.isEmpty ? tr('Загрузки/NanoLink (по умолчанию)', 'Downloads/NanoLink (default)') : s.settings.inboxDir,
+                    trailing: SoftButton(
+                      label: tr('Изменить', 'Change'),
+                      onTap: () async {
+                        final r = await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => FolderPickPage(title: tr('Куда сохранять принятое', 'Where to save received files'))));
+                        if (r != null) s.setInboxDir(r);
+                      },
+                    ),
+                  ),
                   _Row(
                     title: tr('Спрашивать о входящих файлах', 'Ask about incoming files'),
                     subtitle: tr('Перед приёмом файла показывать «Принять / Отклонить»', 'Show Accept / Decline before a file is received'),

@@ -57,6 +57,13 @@ class Native {
     await _call<bool>('notify', {'title': title, 'text': text, 'id': id});
   }
 
+  /// [всего, свободно] в байтах для общего хранилища или null.
+  static Future<List<int>?> storageStats() async {
+    final r = await _call<List<dynamic>>('storageStats');
+    if (r == null || r.length < 2) return null;
+    return [(r[0] as num).toInt(), (r[1] as num).toInt()];
+  }
+
   static Future<List<String>> takeShared() async {
     final r = await _call<List<dynamic>>('takeShared');
     return r == null ? <String>[] : r.map((e) => e.toString()).toList();
