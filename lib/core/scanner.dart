@@ -36,7 +36,7 @@ class ScanHit {
 
 /// Сканер локальной сети: открытые порты (SMB/FTP/SSH/ADB/…), SSDP, имя хоста, MAC.
 class Scanner {
-  static const List<int> probePorts = [445, 139, 21, 2121, 22, kPeerPort, 5555, 8008, 8009, 53317];
+  static const List<int> probePorts = [445, 139, 21, 2121, 2020, 3780, 5021, 22, kPeerPort, 5555, 8008, 8009, 53317];
 
   bool _running = false;
   bool get running => _running;

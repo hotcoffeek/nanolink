@@ -6,9 +6,13 @@ abstract class Hub {
   String get myName;
   DeviceKind get myKind;
   bool get allowWrite;
+  bool get autoPairOn;
 
   /// Самолечение: найти устройство заново (после смены IP, обрыва сети, VPN и т.п.).
   Future<void> heal(Device d);
+
+  /// Адреса сохранённых устройств, которые не лежат в обычной локалке (Tailscale, ZeroTier, вручную).
+  List<String> remoteTargets();
 
   void saveSoon();
   void deviceChanged();

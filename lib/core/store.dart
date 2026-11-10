@@ -44,6 +44,7 @@ class Settings {
   String conflict = 'rename'; // rename | overwrite | skip
   bool bindWifi = true;
   bool serverOn = true;
+  bool autoPair = true;
 
   Map<String, dynamic> toJson() => {
         'theme': theme,
@@ -53,6 +54,7 @@ class Settings {
         'conflict': conflict,
         'bindWifi': bindWifi,
         'serverOn': serverOn,
+        'autoPair': autoPair,
       };
 
   void apply(Map<String, dynamic> j) {
@@ -63,5 +65,6 @@ class Settings {
     conflict = (j['conflict'] ?? conflict).toString();
     bindWifi = (j['bindWifi'] ?? bindWifi) as bool;
     serverOn = (j['serverOn'] ?? serverOn) as bool;
+    autoPair = (j['autoPair'] ?? autoPair) as bool;
   }
 }

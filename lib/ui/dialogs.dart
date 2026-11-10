@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/i18n.dart';
 import '../core/models.dart';
@@ -152,7 +153,7 @@ Future<bool> credsDialog(BuildContext ctx, AppState s, Device d, String proto) a
       title: Text('${protoLabel(proto)} · ${d.title}'),
       content: SizedBox(
         width: 380,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
+        child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: user, decoration: InputDecoration(labelText: tr('Логин', 'Login'))),
           const SizedBox(height: 10),
           TextField(controller: pass, obscureText: true, decoration: InputDecoration(labelText: tr('Пароль', 'Password'))),
@@ -167,7 +168,29 @@ Future<bool> credsDialog(BuildContext ctx, AppState s, Device d, String proto) a
                     : tr('Логин и пароль пользователя SSH на устройстве.', 'SSH user login and password on the device.')),
             style: TextStyle(color: NlScope.of(dctx).muted, fontSize: 12.5),
           ),
-        ]),
+          if (proto == 'sftp') ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: NlScope.of(dctx).surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: NlScope.of(dctx).border)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  tr('Steam Deck: без этих двух команд в консоли доступ не заработает (и задайте пароль командой passwd):', 'Steam Deck: SFTP will not work without these two console commands (and set a password with passwd):'),
+                  style: TextStyle(color: NlScope.of(dctx).muted, fontSize: 12),
+                ),
+                const SizedBox(height: 6),
+                const SelectableText('sudo systemctl enable sshd\nsudo systemctl start sshd', style: TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Clipboard.setData(const ClipboardData(text: 'sudo systemctl enable sshd\nsudo systemctl start sshd')),
+                    child: Text(tr('Копировать', 'Copy')),
+                  ),
+                ),
+              ]),
+            ),
+          ],
+        ])),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(dctx, false), child: Text(tr('Отмена', 'Cancel'))),

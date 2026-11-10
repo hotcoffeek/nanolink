@@ -94,6 +94,20 @@ class MainActivity : FlutterActivity() {
                         val ui = getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
                         result.success(ui.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION)
                     }
+                    "openFile" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        val mime = call.argument<String>("mime") ?: "*/*"
+                        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", File(path))
+                        val i = Intent(Intent.ACTION_VIEW)
+                        i.setDataAndType(uri, mime)
+                        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        try {
+                            startActivity(i)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
                     "isTablet" -> {
                         result.success(resources.configuration.smallestScreenWidthDp >= 600)
                     }

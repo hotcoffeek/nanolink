@@ -92,6 +92,14 @@ class SettingsPage extends StatelessWidget {
                 t: t,
                 child: Column(children: [
                   _Row(
+                    title: tr('Не спрашивать разрешение', "Don't ask for permission"),
+                    subtitle: tr('Новые устройства получают доступ сразу, без подтверждения. Выключите, если в сети есть чужие.', 'New devices get access instantly. Turn off on untrusted networks.'),
+                    trailing: Switch(
+                      value: s.settings.autoPair,
+                      onChanged: s.setAutoPair,
+                    ),
+                  ),
+                  _Row(
                     title: tr('Прямая сеть в обход VPN', 'Direct network, bypass VPN'),
                     subtitle: tr('Соединения с устройствами идут по Wi-Fi, даже если включён VPN', 'Device connections go over Wi-Fi even when a VPN is on'),
                     trailing: Switch(value: s.settings.bindWifi, onChanged: s.setBindWifi),

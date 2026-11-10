@@ -56,6 +56,14 @@ Future<FrameSocket> peerHandshake(Device dev, Hub hub) async {
       final nonce = (m['nonce'] ?? '').toString();
       fs.sendJson({'t': 'auth', 'mac': hmacHex(secret, nonce + hub.myId)});
       m = await fs.readJson(idle: const Duration(seconds: 8));
+      if (m['t'] == 'pair') {
+        fs.sendJson({'t': 'pair'});
+        m = await fs.readJson(idle: const Duration(seconds: 75));
+        if (m['t'] == 'paired') {
+          hub.trust(dev.id, (m['secret'] ?? '').toString(), name: dev.name, kind: dev.kind, ip: host);
+          m = await fs.readJson(idle: const Duration(seconds: 8));
+        }
+      }
     } else if (m['t'] == 'pair') {
       fs.sendJson({'t': 'pair'});
       // человек на другой стороне должен нажать «Разрешить»

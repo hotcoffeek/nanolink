@@ -239,9 +239,9 @@ class _AddDeviceState extends State<_AddDevice> {
         const SizedBox(height: 10),
         TextField(
           controller: _ip,
-          keyboardType: TextInputType.number,
+          keyboardType: TextInputType.url,
           onSubmitted: (_) => _add(),
-          decoration: InputDecoration(hintText: tr('IP-адрес, например 192.168.1.50', 'IP address, e.g. 192.168.1.50'), prefixIcon: const Icon(Icons.lan_outlined)),
+          decoration: InputDecoration(hintText: tr('IP или Tailscale 100.x, например 100.64.1.5', 'IP or Tailscale 100.x, e.g. 100.64.1.5'), prefixIcon: const Icon(Icons.lan_outlined)),
         ),
         const SizedBox(height: 12),
         Row(children: [

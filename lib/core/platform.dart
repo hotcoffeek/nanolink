@@ -42,6 +42,8 @@ class Native {
     return r.map((e) => e.toString()).toList();
   }
 
+  static Future<bool> openFile(String path, String mime) async => (await _call<bool>('openFile', {'path': path, 'mime': mime})) ?? false;
+
   static Future<String> deviceModel() async => (await _call<String>('deviceModel')) ?? 'Android';
   static Future<bool> isTv() async => (await _call<bool>('isTv')) ?? false;
   static Future<bool> isTablet() async => (await _call<bool>('isTablet')) ?? false;

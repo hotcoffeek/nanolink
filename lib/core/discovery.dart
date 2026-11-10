@@ -21,6 +21,8 @@ class Discovery {
   String _txKey = '';
   Timer? _timer;
   final Map<String, DateTime> _seen = {};
+  RawDatagramSocket? _uni;
+  List<Nic> _ovl = const [];
 
   Discovery(this.hub);
 
@@ -32,6 +34,9 @@ class Discovery {
       _rx!.broadcastEnabled = true;
       _rx!.listen(_onEvent, onError: (Object e) {});
     } catch (_) {}
+    try {
+      _uni = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+    } catch (_) {}
     await _tick();
     _timer = Timer.periodic(const Duration(seconds: 3), (_) => _tick());
   }
@@ -41,6 +46,8 @@ class Discovery {
     _timer = null;
     _rx?.close();
     _rx = null;
+    _uni?.close();
+    _uni = null;
     _closeTx();
   }
 
@@ -69,6 +76,7 @@ class Discovery {
         }
         _txKey = key;
       }
+      _ovl = await overlayNics();
       announce();
     } catch (_) {}
   }
@@ -88,6 +96,19 @@ class Discovery {
       for (final target in ['255.255.255.255', t.nic.broadcast]) {
         try {
           t.sock.send(data, InternetAddress(target), kDiscoPort);
+        } catch (_) {}
+      }
+    }
+    // Tailscale / ZeroTier и добавленные вручную адреса: широковещания нет, шлём напрямую.
+    final u = _uni;
+    if (u != null) {
+      final targets = <String>{...hub.remoteTargets()};
+      for (final o in _ovl) {
+        targets.add(o.broadcast);
+      }
+      for (final t in targets) {
+        try {
+          u.send(data, InternetAddress(t), kDiscoPort);
         } catch (_) {}
       }
     }
@@ -121,8 +142,10 @@ class Discovery {
 
       // Первое знакомство - сразу отвечаем напрямую, чтобы не ждать следующего маяка
       final fresh = prev == null || DateTime.now().difference(prev).inSeconds > 8;
-      if (fresh && j['r'] != 1 && _tx.isNotEmpty) {
-        _tx.first.sock.send(_payload(reply: true), d.address, kDiscoPort);
+      if (fresh && j['r'] != 1) {
+        final lan = nicFor(ip) != null;
+        final sock = lan && _tx.isNotEmpty ? _tx.first.sock : _uni;
+        sock?.send(_payload(reply: true), d.address, kDiscoPort);
       }
     } catch (_) {}
   }

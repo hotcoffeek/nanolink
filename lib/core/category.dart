@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'local_vfs.dart';
 import 'models.dart';
+import 'vfs.dart';
 
 enum Cat { photos, videos, audio, docs }
 
@@ -89,4 +90,98 @@ FsEntry? entryOfPath(String path) {
   } catch (_) {
     return null;
   }
+}
+
+const Map<Cat, Set<String>> _hiNames = {
+  Cat.photos: {'dcim', 'pictures', 'camera', 'screenshots', 'whatsapp images', 'images', 'photos', 'фото', 'изображения'},
+  Cat.videos: {'dcim', 'movies', 'videos', 'camera', 'video', 'whatsapp video', 'видео', 'фильмы'},
+  Cat.audio: {'music', 'download', 'downloads', 'podcasts', 'audio', 'recordings', 'музыка'},
+  Cat.docs: {'documents', 'download', 'downloads', 'books', 'документы', 'загрузки'},
+};
+
+const Set<String> _skipNames = {
+  'android', 'node_modules', 'appdata', 'windows', 'program files', 'program files (x86)', 'programdata',
+  r'$recycle.bin', 'system volume information', 'proc', 'sys', 'dev', 'usr', 'lib', 'etc', 'var', 'bin', 'sbin', 'run', 'boot', 'snap',
+};
+
+/// Быстрый поиск по удалённому устройству: сначала «говорящие» папки (DCIM, Pictures, Music...), потом верх дерева.
+/// Результаты отдаются по мере нахождения, поиск останавливается через [cancelled].
+Future<List<Album>> scanCategoryRemote(
+  Vfs v,
+  Cat c,
+  List<String> starts, {
+  required void Function(int found, List<Album> albums) onProgress,
+  required bool Function() cancelled,
+}) async {
+  final exts = catExt[c]!;
+  final hi = _hiNames[c]!;
+  final hiQ = <List<dynamic>>[]; // [path, depth]
+  final loQ = <List<dynamic>>[];
+  final seen = <String>{};
+  for (final s in starts) {
+    if (seen.add(s)) loQ.add([s, 0]);
+  }
+  final albums = <String, Album>{};
+  var found = 0;
+  var calls = 0;
+  var active = 0;
+  var lastEmit = DateTime.now();
+
+  void emit({bool force = false}) {
+    final now = DateTime.now();
+    if (!force && now.difference(lastEmit).inMilliseconds < 350) return;
+    lastEmit = now;
+    final l = albums.values.toList()..sort((a, b) => b.count.compareTo(a.count));
+    onProgress(found, l);
+  }
+
+  Future<void> worker() async {
+    while (!cancelled()) {
+      List<dynamic>? job;
+      if (hiQ.isNotEmpty) {
+        job = hiQ.removeLast();
+      } else if (loQ.isNotEmpty) {
+        job = loQ.removeAt(0);
+      } else if (active == 0) {
+        return;
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        continue;
+      }
+      if (calls++ > 600) return;
+      active++;
+      final dir = job[0] as String;
+      final depth = job[1] as int;
+      final inHi = job.length > 2;
+      try {
+        final items = await v.list(dir);
+        for (final e in items) {
+          if (e.isDir) {
+            final n = e.name.toLowerCase();
+            if (n.startsWith('.') || _skipNames.contains(n)) continue;
+            if (!seen.add(e.path)) continue;
+            final isHi = hi.contains(n);
+            if (isHi || inHi) {
+              if (depth < 6) hiQ.add([e.path, depth + 1, 1]);
+            } else if (depth < 2) {
+              loQ.add([e.path, depth + 1]);
+            }
+          } else if (exts.contains(e.ext)) {
+            final a = albums.putIfAbsent(dir, () => Album(dir, v.basename(dir).isEmpty ? dir : v.basename(dir)));
+            a.count++;
+            found++;
+          }
+        }
+        emit();
+      } catch (_) {
+      } finally {
+        active--;
+      }
+    }
+  }
+
+  await Future.wait(List.generate(4, (_) => worker()));
+  emit(force: true);
+  final l = albums.values.toList()..sort((a, b) => b.count.compareTo(a.count));
+  return l;
 }

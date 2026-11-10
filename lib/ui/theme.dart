@@ -14,6 +14,7 @@ class NlTheme {
   final Color muted;
   final Bg bgStyle;
   final Color rainColor;
+  final bool light;
 
   const NlTheme({
     required this.id,
@@ -27,13 +28,27 @@ class NlTheme {
     this.muted = const Color(0xFF8A92A3),
     this.bgStyle = Bg.none,
     this.rainColor = const Color(0xFF00FF66),
+    this.light = false,
   });
 
-  Color get border => Colors.white.withValues(alpha: 0.07);
+  Color get tint => light ? Colors.black : Colors.white;
+  Color get border => tint.withValues(alpha: light ? 0.10 : 0.07);
   LinearGradient get gradient => LinearGradient(colors: [accent, accent2], begin: Alignment.topLeft, end: Alignment.bottomRight);
 }
 
 const List<NlTheme> kThemes = [
+  NlTheme(
+    id: 'light',
+    name: 'Light',
+    bg: Color(0xFFF5F5F7),
+    surface: Color(0xFFFFFFFF),
+    surface2: Color(0xFFEAEAEF),
+    accent: Color(0xFF0A84FF),
+    accent2: Color(0xFF5AC8FA),
+    text: Color(0xFF1D1D1F),
+    muted: Color(0xFF6E6E73),
+    light: true,
+  ),
   NlTheme(
     id: 'oled',
     name: 'OLED Black',
@@ -143,7 +158,7 @@ NlTheme themeById(String id) {
 }
 
 ThemeData buildTheme(NlTheme t) {
-  final scheme = ColorScheme.dark(
+  final scheme = (t.light ? ColorScheme.light : ColorScheme.dark)(
     primary: t.accent,
     secondary: t.accent2,
     surface: t.surface,
@@ -152,7 +167,7 @@ ThemeData buildTheme(NlTheme t) {
   );
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
+    brightness: t.light ? Brightness.light : Brightness.dark,
     colorScheme: scheme,
     scaffoldBackgroundColor: t.bg,
     canvasColor: t.surface,
@@ -187,6 +202,6 @@ ThemeData buildTheme(NlTheme t) {
       trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? t.accent : t.surface2),
     ),
     dividerColor: t.border,
-    textTheme: Typography.whiteMountainView.apply(bodyColor: t.text, displayColor: t.text),
+    textTheme: (t.light ? Typography.blackMountainView : Typography.whiteMountainView).apply(bodyColor: t.text, displayColor: t.text),
   );
 }

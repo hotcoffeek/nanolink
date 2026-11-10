@@ -83,6 +83,31 @@ bool isPrivateIp(String ip) {
   return false;
 }
 
+/// Адреса «оверлейных» сетей (Tailscale 100.64.0.0/10, ZeroTier), доступные из любой точки мира.
+bool isOverlayIp(String ip) {
+  final p = ip.split('.');
+  if (p.length != 4) return false;
+  final a = int.tryParse(p[0]) ?? 0;
+  final b = int.tryParse(p[1]) ?? 0;
+  return a == 100 && b >= 64 && b <= 127;
+}
+
+Future<List<Nic>> overlayNics() async {
+  final res = <Nic>[];
+  try {
+    final list = await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false, includeLinkLocal: false);
+    for (final i in list) {
+      final n = i.name.toLowerCase();
+      for (final a in i.addresses) {
+        if (isOverlayIp(a.address) || n.startsWith('zt') || n.contains('zerotier') || n.contains('tailscale')) {
+          res.add(Nic(i.name, a.address));
+        }
+      }
+    }
+  } catch (_) {}
+  return res;
+}
+
 List<Nic> _nicCache = const [];
 DateTime _nicAt = DateTime.fromMillisecondsSinceEpoch(0);
 

@@ -155,7 +155,9 @@ class AppState extends ChangeNotifier implements Hub {
     _refreshSelf();
 
     if (Platform.isAndroid) {
+      _lastBind = settings.bindWifi;
       unawaited(Native.startKeepAlive(bindWifi: settings.bindWifi));
+      unawaited(applyBind());
       unawaited(Native.requestNotifications());
     }
 
@@ -252,10 +254,17 @@ class AppState extends ChangeNotifier implements Hub {
     notifyListeners();
   }
 
+  void setAutoPair(bool v) {
+    settings.autoPair = v;
+    saveSoon();
+    notifyListeners();
+  }
+
   Future<void> setBindWifi(bool v) async {
     settings.bindWifi = v;
     saveSoon();
-    if (Platform.isAndroid) await Native.startKeepAlive(bindWifi: v);
+    _lastBind = !v;
+    await applyBind();
     notifyListeners();
   }
 
@@ -288,8 +297,8 @@ class AppState extends ChangeNotifier implements Hub {
     final l = List<Device>.from(devices);
     l.sort((a, b) {
       if (a.favorite != b.favorite) return a.favorite ? -1 : 1;
-      if (a.online != b.online) return a.online ? -1 : 1;
-      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      final c = a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      return c != 0 ? c : a.id.compareTo(b.id);
     });
     return l;
   }
@@ -304,6 +313,7 @@ class AppState extends ChangeNotifier implements Hub {
   void removeDevice(Device d) {
     devices.remove(d);
     _trusted.remove(d.id);
+    unawaited(applyBind());
     saveSoon();
     notifyListeners();
   }
@@ -448,10 +458,43 @@ class AppState extends ChangeNotifier implements Hub {
     notifyListeners();
   }
 
+  @override
+  bool get autoPairOn => settings.autoPair;
+
+  @override
+  List<String> remoteTargets() {
+    final out = <String>[];
+    for (final d in devices) {
+      final h = d.host;
+      if (d.isSelf || h == null || h.isEmpty) continue;
+      if (!RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(h)) continue;
+      if (nicFor(h) != null) continue;
+      out.add(h);
+    }
+    return out;
+  }
+
+  bool _lastBind = true;
+
+  /// Привязка к Wi-Fi помогает против VPN, но ломает Tailscale/ZeroTier и мобильный интернет,
+  /// поэтому при наличии оверлейных устройств она автоматически выключается.
+  Future<void> applyBind() async {
+    if (!Platform.isAndroid) return;
+    var want = settings.bindWifi;
+    for (final d in devices) {
+      final h = d.host;
+      if (h != null && isOverlayIp(h)) want = false;
+    }
+    if (want == _lastBind) return;
+    _lastBind = want;
+    await Native.startKeepAlive(bindWifi: want);
+  }
+
   PairRequest? get pendingPair => _pairQ.isEmpty ? null : _pairQ.first.req;
 
   @override
   Future<bool> askPair(PairRequest r) {
+    if (settings.autoPair) return Future<bool>.value(true);
     for (final w in _pairQ) {
       if (w.req.id == r.id) return w.done.future;
     }
@@ -605,8 +648,8 @@ class AppState extends ChangeNotifier implements Hub {
 
   Future<String?> addManual(String ip) async {
     final t = ip.trim();
-    if (!RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(t)) {
-      return tr('Введите IP вида 192.168.1.50', 'Enter an IP like 192.168.1.50');
+    if (!RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(t)) {
+      return tr('Введите IP (192.168.1.50 или 100.x от Tailscale) или имя', 'Enter an IP (192.168.1.50 or Tailscale 100.x) or a name');
     }
     await localNics(fresh: true);
     final hit = await scanner.probeHost(t);
@@ -623,11 +666,13 @@ class AppState extends ChangeNotifier implements Hub {
         devices.add(d);
       }
       saveSoon();
+      unawaited(applyBind());
       notifyListeners();
       return tr('Устройство не ответило, но добавлено - настройте протокол вручную', 'No answer, added anyway - configure the protocol manually');
     }
     _mergeScan([hit]);
     saveSoon();
+    unawaited(applyBind());
     notifyListeners();
     return null;
   }

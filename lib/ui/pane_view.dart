@@ -11,6 +11,7 @@ import '../core/peer.dart';
 import '../core/sftp_vfs.dart';
 import '../core/smb_vfs.dart';
 import '../core/state.dart';
+import '../core/thumbs.dart';
 import '../core/util.dart';
 import 'dialogs.dart';
 import 'theme.dart';
@@ -123,6 +124,10 @@ class _Header extends StatelessWidget {
                 if (pane.attached) ...[
                   const SizedBox(width: 8),
                   PulseDot(color: online ? const Color(0xFF3DDC84) : const Color(0xFFFF4D5E), size: 8),
+                  if (online && !pane.isLocal && pane.entries.isNotEmpty) ...[
+                    const SizedBox(width: 5),
+                    Text(tr('Подключено', 'Connected'), style: const TextStyle(color: Color(0xFF3DDC84), fontSize: 11, fontWeight: FontWeight.w700)),
+                  ],
                 ],
                 const SizedBox(width: 4),
                 Icon(Icons.expand_more_rounded, size: 18, color: t.muted),
@@ -248,7 +253,7 @@ class _Strip extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!pane.attached) return const SizedBox.shrink();
     final chips = <Widget>[];
-    if (pane.isLocal) {
+    {
       chips.add(SoftButton(
         label: tr('Файлы', 'Files'),
         icon: Icons.folder_open_rounded,
@@ -370,7 +375,52 @@ Widget _thumb(PaneController pane, FsEntry e, double size, FileStyle st) {
       ),
     );
   }
+  if (!pane.isLocal && pane.vfs != null && !e.isDir && _imgExt.contains(e.ext) && e.size > 0 && e.size < 8 * 1024 * 1024) {
+    return _RemoteImg(pane: pane, e: e, w: size, h: size, st: st, radius: 8);
+  }
   return Icon(st.icon, color: st.color, size: size * 0.7);
+}
+
+class _RemoteImg extends StatelessWidget {
+  final PaneController pane;
+  final FsEntry e;
+  final double w;
+  final double h;
+  final FileStyle st;
+  final double radius;
+  const _RemoteImg({required this.pane, required this.e, required this.w, required this.h, required this.st, required this.radius});
+
+  @override
+  Widget build(BuildContext context) {
+    final v = pane.vfs!;
+    return FutureBuilder<File?>(
+      future: RemoteThumbs.get(v, e, pane.dev?.id ?? 'x'),
+      builder: (_, snap) {
+        final f = snap.data;
+        if (f == null) return Icon(st.icon, color: st.color, size: w.isFinite ? w * 0.7 : 46);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: Image.file(f, width: w.isFinite ? w : null, height: h.isFinite ? h : null, fit: BoxFit.cover, cacheWidth: 360, gaplessPlayback: true, errorBuilder: (_, __, ___) => Icon(st.icon, color: st.color, size: 46)),
+        );
+      },
+    );
+  }
+}
+
+Future<void> _tapEntry(BuildContext context, PaneController pane, FsEntry e) async {
+  if (e.isDir) {
+    await pane.cd(e.path, keepFilter: pane.filter != null);
+    return;
+  }
+  if (pane.selected.isNotEmpty) {
+    pane.toggle(e);
+    return;
+  }
+  if (!pane.isLocal) toast(context, tr('Открываю «${e.name}»…', 'Opening "${e.name}"…'));
+  final r = await pane.openFile(e);
+  if (r != null && context.mounted) {
+    toast(context, r == 'no-app' ? tr('Нет приложения для этого файла', 'No app can open this file') : r);
+  }
 }
 
 class _RowTile extends StatelessWidget {
@@ -385,7 +435,8 @@ class _RowTile extends StatelessWidget {
     final sel = pane.selected.contains(e.path);
     final st = fileStyle(e);
     return InkWell(
-      onTap: () => e.isDir ? pane.cd(e.path, keepFilter: pane.filter != null) : pane.toggle(e),
+      onTap: () => _tapEntry(context, pane, e),
+      onLongPress: () => pane.toggle(e),
       onSecondaryTap: () => pane.toggle(e),
       child: Container(
         color: sel ? t.accent.withValues(alpha: 0.14) : Colors.transparent,
@@ -429,7 +480,8 @@ class _GridTile extends StatelessWidget {
     final st = fileStyle(e);
     return InkWell(
       borderRadius: BorderRadius.circular(14),
-      onTap: () => e.isDir ? pane.cd(e.path, keepFilter: pane.filter != null) : pane.toggle(e),
+      onTap: () => _tapEntry(context, pane, e),
+      onLongPress: () => pane.toggle(e),
       onSecondaryTap: () => pane.toggle(e),
       child: Container(
         decoration: BoxDecoration(
@@ -475,6 +527,9 @@ Widget _thumbFill(PaneController pane, FsEntry e, Size box, FileStyle st) {
         errorBuilder: (_, __, ___) => Icon(st.icon, color: st.color, size: 46),
       ),
     );
+  }
+  if (!pane.isLocal && pane.vfs != null && !e.isDir && _imgExt.contains(e.ext) && e.size > 0 && e.size < 8 * 1024 * 1024) {
+    return _RemoteImg(pane: pane, e: e, w: box.width, h: box.height, st: st, radius: 10);
   }
   return Icon(st.icon, color: st.color, size: 46);
 }

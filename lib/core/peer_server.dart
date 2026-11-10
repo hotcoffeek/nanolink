@@ -84,8 +84,10 @@ class PeerServer {
         fs.sendJson({'t': 'ready', 'sid': hub.myId});
         return _PeerInfo(id, name, kind, ip);
       }
-      fs.sendJson({'t': 'denied'});
-      return null;
+      if (!hub.autoPairOn) {
+        fs.sendJson({'t': 'denied'});
+        return null;
+      }
     }
 
     // Первое знакомство: спрашиваем разрешение у человека

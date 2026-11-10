@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'category.dart';
 import 'i18n.dart';
 import 'local_vfs.dart';
 import 'models.dart';
 import 'peer.dart';
+import 'platform.dart';
 import 'smb_vfs.dart';
 import 'util.dart';
 import 'vfs.dart';
@@ -63,6 +65,7 @@ class PaneController extends ChangeNotifier {
     dev = d;
     cat = null;
     filter = null;
+    _catCache.clear();
     albums = const [];
     entries = const [];
     places = const [];
@@ -162,10 +165,28 @@ class PaneController extends ChangeNotifier {
     notifyListeners();
     if (!catLoading) return;
     try {
-      final l = await scanCategory(c, onProgress: (n) {
-        catFound = n;
-        notifyListeners();
-      });
+      final List<Album> l;
+      final v = vfs;
+      if (isLocal || v == null) {
+        l = await scanCategory(c, onProgress: (n) {
+          catFound = n;
+          notifyListeners();
+        });
+      } else {
+        final starts = <String>[];
+        try {
+          starts.add(await v.start());
+        } catch (_) {}
+        for (final p in places) {
+          if (!starts.contains(p.path)) starts.add(p.path);
+        }
+        if (starts.isEmpty) starts.add(path);
+        l = await scanCategoryRemote(v, c, starts, cancelled: () => cat != c || vfs != v, onProgress: (n, list) {
+          catFound = n;
+          if (cat == c) albums = list;
+          notifyListeners();
+        });
+      }
       _catCache[c] = l;
       if (cat == c) albums = l;
     } catch (_) {}
@@ -211,6 +232,103 @@ class PaneController extends ChangeNotifier {
   }
 
   List<FsEntry> get selectedEntries => entries.where((e) => selected.contains(e.path)).toList();
+
+  static String mimeOf(String ext) {
+    switch (ext.toLowerCase()) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      case 'heic':
+        return 'image/heic';
+      case 'mp4':
+      case 'm4v':
+        return 'video/mp4';
+      case 'mkv':
+        return 'video/x-matroska';
+      case 'webm':
+        return 'video/webm';
+      case 'avi':
+        return 'video/x-msvideo';
+      case 'mov':
+        return 'video/quicktime';
+      case '3gp':
+        return 'video/3gpp';
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'flac':
+        return 'audio/flac';
+      case 'wav':
+        return 'audio/wav';
+      case 'm4a':
+      case 'aac':
+        return 'audio/mp4';
+      case 'ogg':
+      case 'opus':
+        return 'audio/ogg';
+      case 'pdf':
+        return 'application/pdf';
+      case 'txt':
+      case 'log':
+      case 'md':
+        return 'text/plain';
+      case 'apk':
+        return 'application/vnd.android.package-archive';
+      case 'doc':
+      case 'docx':
+        return 'application/msword';
+      case 'xls':
+      case 'xlsx':
+        return 'application/vnd.ms-excel';
+      case 'ppt':
+      case 'pptx':
+        return 'application/vnd.ms-powerpoint';
+      case 'zip':
+        return 'application/zip';
+    }
+    return '*/*';
+  }
+
+  int _openSeq = 0;
+
+  /// Открыть файл: локальный сразу, удалённый - скачав во временную папку. Возвращает текст ошибки или null.
+  Future<String?> openFile(FsEntry e, {void Function(String)? status}) async {
+    final v = vfs;
+    if (v == null) return null;
+    final seq = ++_openSeq;
+    try {
+      var local = e.path;
+      if (!isLocal) {
+        final tmp = (await getTemporaryDirectory()).path;
+        final dir = Directory('$tmp/nl_open');
+        if (!dir.existsSync()) dir.createSync(recursive: true);
+        final f = File('${dir.path}/${e.name}');
+        final sink = f.openWrite();
+        var got = 0;
+        try {
+          await for (final chunk in v.read(e.path, 0)) {
+            sink.add(chunk);
+            got += chunk.length;
+            if (seq != _openSeq) break;
+            if (e.size > 0) status?.call('${(got * 100 ~/ e.size).clamp(0, 100)}%');
+          }
+        } finally {
+          await sink.close();
+        }
+        if (seq != _openSeq) return null;
+        local = f.path;
+      }
+      final ok = await Native.openFile(local, mimeOf(e.ext));
+      return ok ? null : 'no-app';
+    } catch (err) {
+      return friendlyError(err);
+    }
+  }
 
   void toggle(FsEntry e) {
     if (!selected.remove(e.path)) selected.add(e.path);
