@@ -354,8 +354,25 @@ void toast(BuildContext context, String msg) {
 }
 
 /// Кнопка «домой»: сразу на главный экран приложения, без многократного «назад».
-Widget homeButton(BuildContext context) => IconBtn(
-      icon: Icons.home_rounded,
-      tip: tr('На главный экран', 'To the main screen'),
-      onTap: () => Navigator.of(context).popUntil((r) => r.isFirst),
-    );
+Widget homeButton(BuildContext context) {
+  final t = NlScope.of(context);
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 4),
+    child: Tooltip(
+      message: tr('На главный экран', 'To the main screen'),
+      child: Material(
+        color: t.accent.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => Navigator.of(context).popUntil((r) => r.isFirst),
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(Icons.home_rounded, size: 30, color: t.accent2),
+          ),
+        ),
+      ),
+    ),
+  );
+}

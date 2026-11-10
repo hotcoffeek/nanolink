@@ -217,6 +217,7 @@ class AppState extends ChangeNotifier implements Hub {
       _lastBind = settings.bindWifi;
       Native.listenShared(pullShared);
       Native.onRecvAnswer = answerRecv;
+      TransferEngine.onJobDone = () => PaneController.fsChanged.value++;
       unawaited(Native.startKeepAlive(bindWifi: settings.bindWifi));
       unawaited(applyBind());
       unawaited(Native.requestNotifications());
@@ -671,6 +672,7 @@ class AppState extends ChangeNotifier implements Hub {
 
   @override
   void onReceived(String from, String path) {
+    PaneController.fsChanged.value++;
     lastFrom = from;
     lastFile = path;
     receivedTick++;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/i18n.dart';
+import '../core/pane.dart';
 import '../core/state.dart';
 import 'devices_page.dart';
 import 'dialogs.dart';
@@ -45,6 +46,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _s?.foreground = state == AppLifecycleState.resumed;
+    PaneController.appActive = state == AppLifecycleState.resumed;
+    if (state == AppLifecycleState.resumed) PaneController.fsChanged.value++;
     if (state == AppLifecycleState.resumed) {
       _s?.checkAllFiles();
       _s?.pullShared();

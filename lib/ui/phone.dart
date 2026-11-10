@@ -1205,6 +1205,12 @@ class _PickerPageState extends State<PickerPage> {
   final PaneController pane = PaneController('pick');
 
   @override
+  void dispose() {
+    pane.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     pane.pickMode = true;
@@ -1332,6 +1338,7 @@ class _BrowsePageState extends State<BrowsePage> {
   @override
   void dispose() {
     pane.vfs?.close();
+    pane.dispose();
     super.dispose();
   }
 

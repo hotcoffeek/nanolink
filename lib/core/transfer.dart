@@ -64,6 +64,9 @@ class TransferJob {
 
 /// Очередь передач. Главное: не падать при обрыве сети - ждать, искать устройство и докачивать с того же места.
 class TransferEngine extends ChangeNotifier {
+  /// Вызывается, когда передача успешно завершилась (панели проводника обновят списки).
+  static void Function()? onJobDone;
+
   final Hub hub;
   TransferEngine(this.hub);
 
@@ -208,6 +211,11 @@ class TransferEngine extends ChangeNotifier {
       try {
         await dst.close();
       } catch (_) {}
+      if (j.state == TState.done) {
+        try {
+          onJobDone?.call();
+        } catch (_) {}
+      }
       notifyListeners();
       _pump();
     }

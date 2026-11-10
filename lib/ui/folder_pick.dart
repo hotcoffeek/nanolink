@@ -24,6 +24,12 @@ class _FolderPickPageState extends State<FolderPickPage> {
   final PaneController pane = PaneController('folder');
 
   @override
+  void dispose() {
+    pane.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     pane.attach(LocalVfs(), () => LocalVfs(), null);
@@ -99,6 +105,12 @@ class FolderViewPage extends StatefulWidget {
 
 class _FolderViewPageState extends State<FolderViewPage> {
   final PaneController pane = PaneController('fview');
+
+  @override
+  void dispose() {
+    pane.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {

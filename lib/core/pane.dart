@@ -25,7 +25,71 @@ String friendlyError(Object e) {
 /// Одна из двух панелей проводника.
 class PaneController extends ChangeNotifier {
   final String id;
-  PaneController(this.id);
+  PaneController(this.id) {
+    fsChanged.addListener(_onFsChanged);
+    _poll = Timer.periodic(const Duration(seconds: 4), (_) {
+      _pollTick++;
+      // Роутеры и FTP/SMB не дёргаем часто: раз в ~12 секунд; телефон/ПК с NanoLink и локальные папки - каждые 4.
+      final cheap = isLocal || vfs is PeerVfs;
+      if (cheap || _pollTick % 3 == 0) unawaited(_autoRefresh());
+    });
+  }
+
+  /// Любое изменение файлов (принят файл, закончилась передача) - панели тихо обновляют список.
+  static final ValueNotifier<int> fsChanged = ValueNotifier<int>(0);
+
+  /// Приложение на экране (иначе опрос папок не нужен).
+  static bool appActive = true;
+
+  Timer? _poll;
+  Timer? _deb;
+  int _pollTick = 0;
+  bool _autoBusy = false;
+  bool _disposed = false;
+
+  void _onFsChanged() {
+    _deb?.cancel();
+    _deb = Timer(const Duration(milliseconds: 600), () => unawaited(_autoRefresh()));
+  }
+
+  String _sig(List<FsEntry> l) {
+    final b = StringBuffer();
+    for (final e in l) {
+      b..write(e.path)..write('|')..write(e.size)..write('|')..write(e.modified?.millisecondsSinceEpoch ?? 0)..write(';');
+    }
+    return b.toString();
+  }
+
+  /// Тихо перечитать текущую папку без «крутилки»; список меняется, только если что-то появилось/исчезло.
+  Future<void> _autoRefresh() async {
+    if (_disposed || _autoBusy || !appActive) return;
+    final v = vfs;
+    if (v == null || loading || error != null || cat != null || filter != null || home || isVirtualRoot) return;
+    _autoBusy = true;
+    final gen = _gen;
+    final p = path;
+    try {
+      final l = await v.list(p).timeout(const Duration(seconds: 12));
+      if (_disposed || gen != _gen || p != path || loading) return;
+      if (_sig(l) != _sig(entries)) {
+        entries = l;
+        selected.removeWhere((x) => !l.any((e) => e.path == x));
+        notifyListeners();
+      }
+    } catch (_) {
+    } finally {
+      _autoBusy = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _poll?.cancel();
+    _deb?.cancel();
+    fsChanged.removeListener(_onFsChanged);
+    super.dispose();
+  }
 
   Vfs? vfs;
   Device? dev;
