@@ -99,10 +99,14 @@ class GradientButton extends StatelessWidget {
               children: [
                 if (icon != null) ...[Icon(icon, size: compact ? 17 : 20, color: Colors.white), const SizedBox(width: 8)],
                 Flexible(
-                  child: Text(
-                    label,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: compact ? 13 : 15),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: compact ? 13 : 15),
+                    ),
                   ),
                 ),
               ],
@@ -142,7 +146,12 @@ class SoftButton extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (icon != null) ...[Icon(icon, size: 16, color: selected ? t.accent2 : t.muted), const SizedBox(width: 6)],
-                Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: t.text))),
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(label, maxLines: 1, softWrap: false, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: t.text)),
+                  ),
+                ),
               ],
             ),
           ),

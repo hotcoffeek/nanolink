@@ -104,6 +104,23 @@ class SettingsPage extends StatelessWidget {
                     ),
                   ),
                   _Row(
+                    title: tr('Открывать папки в', 'Open folders with'),
+                    subtitle: s.settings.folderApp.isEmpty
+                        ? tr('Спрашивать при первом открытии', 'Ask on first use')
+                        : (s.settings.folderAppLabel.isEmpty ? s.settings.folderApp : s.settings.folderAppLabel),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (s.settings.folderApp.isNotEmpty) IconBtn(icon: Icons.restart_alt_rounded, tip: tr('Сбросить', 'Reset'), onTap: () => s.setFolderApp('', '')),
+                      SoftButton(
+                        label: tr('Выбрать', 'Choose'),
+                        onTap: () async {
+                          final dir = await s.localInbox();
+                          if (!context.mounted) return;
+                          await chooseFolderApp(context, s, dir, forceRemember: true);
+                        },
+                      ),
+                    ]),
+                  ),
+                  _Row(
                     title: tr('Спрашивать о входящих файлах', 'Ask about incoming files'),
                     subtitle: tr('Перед приёмом файла показывать «Принять / Отклонить»', 'Show Accept / Decline before a file is received'),
                     trailing: Switch(value: s.settings.askReceive, onChanged: s.setAskReceive),
@@ -141,6 +158,31 @@ class SettingsPage extends StatelessWidget {
                 ]),
               ),
             ],
+            const SizedBox(height: 14),
+            _Card(
+              title: tr('КУДА ОТПРАВЛЯТЬ', 'WHERE TO SEND'),
+              t: t,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  tr('По умолчанию файлы с телефона сразу попадают на «Рабочий стол» ПК. Другую папку можно запомнить для каждого устройства: удерживайте устройство → «Отправить в другую папку» → галочка «Запомнить».',
+                      'By default files from the phone go straight to the PC "Desktop". You can remember another folder per device: long-press a device → "Send to another folder" → tick "Remember".'),
+                  style: TextStyle(color: t.muted, fontSize: 12.5, height: 1.4),
+                ),
+                const SizedBox(height: 8),
+                if (s.settings.dests.isEmpty)
+                  _Row(title: tr('Запомненных папок нет', 'No remembered folders'), subtitle: tr('Везде используется «Рабочий стол»', 'Desktop is used everywhere'), trailing: const SizedBox.shrink())
+                else ...[
+                  for (final e in s.settings.dests.entries)
+                    _Row(
+                      title: s.deviceById(e.key)?.title ?? tr('Устройство', 'Device'),
+                      subtitle: e.value,
+                      trailing: SoftButton(label: tr('Сбросить', 'Reset'), onTap: () => s.clearDest(e.key)),
+                    ),
+                  const SizedBox(height: 6),
+                  SoftButton(label: tr('Сбросить все на «Рабочий стол»', 'Reset all to Desktop'), icon: Icons.restart_alt_rounded, onTap: s.clearAllDests),
+                ],
+              ]),
+            ),
             const SizedBox(height: 14),
             _Card(
               title: tr('СЕТЬ', 'NETWORK'),

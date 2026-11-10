@@ -45,8 +45,11 @@ class Settings {
   bool bindWifi = true;
   bool serverOn = true;
   bool autoPair = true;
-  bool askReceive = false;
+  bool askReceive = true;
   String inboxDir = '';
+  String folderApp = ''; // '' - спрашивать, 'nanolink' - встроенный проводник, иначе пакет приложения
+  String folderAppLabel = '';
+  Map<String, String> dests = {}; // id устройства -> запомненная папка назначения на нём
 
   Map<String, dynamic> toJson() => {
         'theme': theme,
@@ -59,6 +62,10 @@ class Settings {
         'autoPair': autoPair,
         'askReceive': askReceive,
         'inboxDir': inboxDir,
+        'folderApp': folderApp,
+        'folderAppLabel': folderAppLabel,
+        'dests': dests,
+        'rcvV': 2,
       };
 
   void apply(Map<String, dynamic> j) {
@@ -72,5 +79,11 @@ class Settings {
     autoPair = (j['autoPair'] ?? autoPair) as bool;
     askReceive = (j['askReceive'] ?? askReceive) as bool;
     inboxDir = (j['inboxDir'] ?? inboxDir).toString();
+    folderApp = (j['folderApp'] ?? folderApp).toString();
+    folderAppLabel = (j['folderAppLabel'] ?? folderAppLabel).toString();
+    final dm = j['dests'];
+    if (dm is Map) dests = {for (final e in dm.entries) e.key.toString(): e.value.toString()};
+    // старые настройки: вопрос о входящих файлах теперь включён по умолчанию
+    if (j['rcvV'] == null) askReceive = true;
   }
 }

@@ -35,6 +35,28 @@ class MainActivity : FlutterActivity() {
         handleShare(intent)
     }
 
+    /** Intent, открывающий папку в файловом менеджере (через DocumentsContract). */
+    private fun folderIntent(path: String): Intent {
+        var vol = "primary"
+        var rel = path
+        if (path.startsWith("/storage/emulated/0")) {
+            rel = path.removePrefix("/storage/emulated/0")
+        } else if (path.startsWith("/sdcard")) {
+            rel = path.removePrefix("/sdcard")
+        } else if (path.startsWith("/storage/")) {
+            val rest = path.removePrefix("/storage/")
+            val i = rest.indexOf('/')
+            vol = if (i < 0) rest else rest.substring(0, i)
+            rel = if (i < 0) "" else rest.substring(i)
+        }
+        rel = rel.trim('/')
+        val uri = android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "$vol:$rel")
+        val i = Intent(Intent.ACTION_VIEW)
+        i.setDataAndType(uri, "vnd.android.document/directory")
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return i
+    }
+
     private fun resolveShared(uri: Uri): String? {
         if (uri.scheme == "file") return uri.path
         try {
@@ -301,6 +323,29 @@ class MainActivity : FlutterActivity() {
                         val i = Intent(Intent.ACTION_VIEW)
                         i.setDataAndType(uri, mime)
                         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        try {
+                            startActivity(i)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "listFolderApps" -> {
+                        val path = call.argument<String>("path") ?: "/storage/emulated/0"
+                        val out = ArrayList<Map<String, String>>()
+                        val seen = HashSet<String>()
+                        for (ri in packageManager.queryIntentActivities(folderIntent(path), 0)) {
+                            val pkg = ri.activityInfo.packageName
+                            if (pkg == packageName || !seen.add(pkg)) continue
+                            out.add(mapOf("pkg" to pkg, "label" to ri.loadLabel(packageManager).toString()))
+                        }
+                        result.success(out)
+                    }
+                    "openFolder" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        val pkg = call.argument<String>("pkg") ?: ""
+                        val i = folderIntent(path)
+                        if (pkg.isNotEmpty()) i.setPackage(pkg)
                         try {
                             startActivity(i)
                             result.success(true)

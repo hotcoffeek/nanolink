@@ -23,7 +23,7 @@ import 'transfers_page.dart';
 import 'widgets.dart';
 
 /// Главный экран на телефоне: минимализм в духе LocalSend.
-/// Получить / Отправить / Передачи / Настройки. Файлы чужих устройств открываются отдельным экраном.
+/// Главная / Получить / Отправить / Передачи / Настройки. Файлы чужих устройств открываются отдельным экраном.
 class PhoneHome extends StatefulWidget {
   const PhoneHome({super.key});
 
@@ -32,11 +32,32 @@ class PhoneHome extends StatefulWidget {
 }
 
 class _PhoneHomeState extends State<PhoneHome> {
-  int _tab = 1;
+  static const int tabHome = 0, tabRecv = 1, tabSend = 2, tabTransfers = 3;
+  int _tab = tabHome;
+  final List<int> _hist = []; // стек вкладок для жеста «назад»
   AppState? _s;
   int _recvSeen = 0;
-  bool _recvOpen = false;
   final GlobalKey<SendPageState> _sendKey = GlobalKey<SendPageState>();
+
+  void _go(int i) {
+    if (i == _tab) return;
+    setState(() {
+      _hist.add(_tab);
+      if (_hist.length > 20) _hist.removeAt(0);
+      _tab = i;
+    });
+  }
+
+  void _back() {
+    if (_tab == tabSend && (_sendKey.currentState?.clearSelection() ?? false)) return;
+    if (_hist.isNotEmpty) {
+      setState(() => _tab = _hist.removeLast());
+    } else if (_tab != tabHome) {
+      setState(() => _tab = tabHome);
+    } else {
+      SystemNavigator.pop();
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -58,20 +79,14 @@ class _PhoneHomeState extends State<PhoneHome> {
     super.dispose();
   }
 
+  // Диалог «Принять файл?» показывает Shell - здесь его открывать нельзя, иначе окон будет два.
   void _onState() {
     final s = _s;
     if (s == null || !mounted) return;
-    if (s.pendingRecv != null && !_recvOpen) {
-      _recvOpen = true;
-      showRecvDialog(context, s).whenComplete(() {
-        _recvOpen = false;
-        if (mounted) _onState();
-      });
-    }
     if (s.pendingShare.isNotEmpty) {
       final items = List<FsEntry>.from(s.pendingShare);
       s.pendingShare.clear();
-      setState(() => _tab = 1);
+      _go(tabSend);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _sendKey.currentState?.addEntries(items);
         if (mounted) toast(context, tr('Выберите устройство для отправки', 'Pick a device to send to'));
@@ -80,7 +95,7 @@ class _PhoneHomeState extends State<PhoneHome> {
     if (s.receivedTick != _recvSeen) {
       _recvSeen = s.receivedTick;
       final f = s.lastFile;
-      if (f != null && _tab != 0) {
+      if (f != null && _tab != tabRecv) {
         final name = f.substring(f.lastIndexOf('/') + 1);
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -95,59 +110,70 @@ class _PhoneHomeState extends State<PhoneHome> {
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
     final t = NlScope.of(context);
-    return Column(children: [
-      Expanded(
-        child: IndexedStack(index: _tab, children: [
-          const ReceivePage(),
-          SendPage(key: _sendKey, onSent: () => setState(() => _tab = 2)),
-          const TransfersPage(),
-          const SettingsPage(),
-        ]),
-      ),
-      ListenableBuilder(
-        listenable: Listenable.merge([s, s.transfers]),
-        builder: (context, _) {
-          final items = [
-            (Icons.wifi_tethering_rounded, tr('Получить', 'Receive'), s.incoming.length),
-            (Icons.send_rounded, tr('Отправить', 'Send'), 0),
-            (Icons.swap_vert_rounded, tr('Передачи', 'Transfers'), s.transfers.activeCount),
-            (Icons.settings_rounded, tr('Настройки', 'Settings'), 0),
-          ];
-          return Container(
-            margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(26), border: Border.all(color: t.border)),
-            child: Row(children: [
-              for (var i = 0; i < items.length; i++)
-                Expanded(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _tab = i),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        gradient: _tab == i ? t.gradient : null,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Badge(
-                          isLabelVisible: items[i].$3 > 0,
-                          label: Text('${items[i].$3}'),
-                          child: Icon(items[i].$1, size: 22, color: _tab == i ? Colors.white : t.muted),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _back();
+      },
+      child: Column(children: [
+        Expanded(
+          child: IndexedStack(index: _tab, children: [
+            HomePage(onGoSend: () => _go(tabSend)),
+            const ReceivePage(),
+            SendPage(key: _sendKey, onSent: () => _go(tabTransfers)),
+            const TransfersPage(),
+            const SettingsPage(),
+          ]),
+        ),
+        ListenableBuilder(
+          listenable: Listenable.merge([s, s.transfers]),
+          builder: (context, _) {
+            final items = [
+              (Icons.home_rounded, tr('Главная', 'Home'), 0),
+              (Icons.wifi_tethering_rounded, tr('Получить', 'Receive'), s.incoming.length),
+              (Icons.send_rounded, tr('Отправить', 'Send'), 0),
+              (Icons.swap_vert_rounded, tr('Передачи', 'Transfers'), s.transfers.activeCount),
+              (Icons.settings_rounded, tr('Настройки', 'Settings'), 0),
+            ];
+            return Container(
+              margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(26), border: Border.all(color: t.border)),
+              child: Row(children: [
+                for (var i = 0; i < items.length; i++)
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _go(i),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 2),
+                        decoration: BoxDecoration(
+                          gradient: _tab == i ? t.gradient : null,
+                          borderRadius: BorderRadius.circular(20),
                         ),
-                        const SizedBox(height: 3),
-                        Text(items[i].$2, maxLines: 1, softWrap: false, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _tab == i ? Colors.white : t.muted)),
-                      ]),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Badge(
+                            isLabelVisible: items[i].$3 > 0,
+                            label: Text('${items[i].$3}'),
+                            child: Icon(items[i].$1, size: 22, color: _tab == i ? Colors.white : t.muted),
+                          ),
+                          const SizedBox(height: 3),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(items[i].$2, maxLines: 1, softWrap: false, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _tab == i ? Colors.white : t.muted)),
+                          ),
+                        ]),
+                      ),
                     ),
                   ),
-                ),
-            ]),
-          );
-        },
-      ),
-    ]);
+              ]),
+            );
+          },
+        ),
+      ]),
+    );
   }
 }
 
@@ -156,6 +182,272 @@ Future<void> openReceived(BuildContext context, String path) async {
   final ext = dot < 0 ? '' : path.substring(dot + 1);
   final ok = await Native.openFile(path, PaneController.mimeOf(ext));
   if (!ok && context.mounted) toast(context, tr('Нет приложения для этого файла', 'No app can open this file'));
+}
+
+Future<bool?> openBrowse(BuildContext context, Device d, {List<FsEntry>? send, String? proto, bool ask = false}) {
+  return Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => BrowsePage(device: d, sendItems: send, proto: proto, ask: ask)));
+}
+
+/// Меню устройства (долгое нажатие).
+void showDeviceSheet(
+  BuildContext context,
+  Device d, {
+  List<FsEntry> sel = const [],
+  required Future<void> Function({List<FsEntry>? send, String? proto, bool ask}) browse,
+}) {
+  final s = AppScope.of(context);
+  final t = NlScope.of(context);
+  final protos = s.protosOf(d);
+  final dest = s.destFor(d);
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: t.surface2,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (sheet) => SafeArea(
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
+            child: Row(children: [
+              Icon(kindIcon(d.kind), color: t.accent2),
+              const SizedBox(width: 12),
+              Expanded(child: Text(d.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
+            ]),
+          ),
+          ListTile(
+            leading: const Icon(Icons.folder_open_rounded),
+            title: Text(tr('Открыть файлы', 'Browse files')),
+            onTap: () {
+              Navigator.pop(sheet);
+              browse();
+            },
+          ),
+          if (sel.isNotEmpty)
+            ListTile(
+              leading: const Icon(Icons.drive_folder_upload_rounded),
+              title: Text(tr('Отправить в другую папку…', 'Send to another folder…')),
+              subtitle: Text(tr('Можно запомнить как папку по умолчанию', 'Can be remembered as the default folder')),
+              onTap: () {
+                Navigator.pop(sheet);
+                browse(send: sel);
+              },
+            ),
+          if (protos.length > 1)
+            ListTile(
+              leading: const Icon(Icons.swap_horiz_rounded),
+              title: Text(tr('Открыть по другому протоколу…', 'Open with another protocol…')),
+              subtitle: Text(protos.map(protoLabel).join(' · ')),
+              onTap: () {
+                Navigator.pop(sheet);
+                browse(ask: true);
+              },
+            ),
+          if (dest.isNotEmpty)
+            ListTile(
+              leading: const Icon(Icons.restart_alt_rounded),
+              title: Text(tr('Сбросить папку по умолчанию', 'Reset default folder')),
+              subtitle: Text('$dest → ${tr('Рабочий стол', 'Desktop')}', maxLines: 1, overflow: TextOverflow.ellipsis),
+              onTap: () {
+                Navigator.pop(sheet);
+                s.clearDest(d.id);
+              },
+            ),
+          ListTile(
+            leading: Icon(d.favorite ? Icons.star_rounded : Icons.star_outline_rounded, color: d.favorite ? const Color(0xFFFFC940) : null),
+            title: Text(d.favorite ? tr('Убрать из избранного', 'Remove from favorites') : tr('В избранное', 'Add to favorites')),
+            onTap: () {
+              Navigator.pop(sheet);
+              d.favorite = !d.favorite;
+              s.updateDevice(d);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.tune_rounded),
+            title: Text(tr('Переименовать, порт и логин', 'Rename, port and login')),
+            onTap: () {
+              Navigator.pop(sheet);
+              editDeviceDialog(context, s, d);
+            },
+          ),
+          if (d.host != null)
+            ListTile(
+              leading: const Icon(Icons.copy_rounded),
+              title: Text(tr('Скопировать адрес ${d.host}', 'Copy address ${d.host}')),
+              onTap: () {
+                Navigator.pop(sheet);
+                Clipboard.setData(ClipboardData(text: d.host!));
+              },
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    ),
+  );
+}
+
+/// Вкладка «Главная»: поиск устройств, ручное подключение, список всех устройств.
+class HomePage extends StatelessWidget {
+  final VoidCallback onGoSend;
+  const HomePage({super.key, required this.onGoSend});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context);
+    return ListenableBuilder(
+      listenable: s,
+      builder: (context, _) {
+        final t = NlScope.of(context);
+        final devs = s.others;
+        final favs = devs.where((d) => d.favorite).toList();
+        final rest = devs.where((d) => !d.favorite).toList();
+        final ip = s.nics.isEmpty ? null : s.nics.first.ip;
+        Widget tile(Device d) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _DevTile(
+                d: d,
+                armed: false,
+                onTap: () => openBrowse(context, d),
+                onLong: () => showDeviceSheet(context, d, browse: ({List<FsEntry>? send, String? proto, bool ask = false}) => openBrowse(context, d, send: send, proto: proto, ask: ask)),
+                onBrowse: () => openBrowse(context, d),
+              ),
+            );
+        return RefreshIndicator(
+          onRefresh: s.rescan,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            children: [
+              GlassCard(
+                padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                child: Row(children: [
+                  GlobeWidget(size: 54, a: t.accent, b: t.accent2),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(s.myName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 2),
+                      Text(
+                        !s.netOnline
+                            ? tr('Нет Wi-Fi', 'No Wi-Fi')
+                            : (s.settings.serverOn ? tr('Видно другим${ip == null ? '' : ' · $ip'}', 'Visible to others${ip == null ? '' : ' · $ip'}') : tr('Приём выключен', 'Receiving is off')),
+                        style: TextStyle(color: s.netOnline && s.settings.serverOn ? const Color(0xFF3DDC84) : t.muted, fontSize: 12.5, fontWeight: FontWeight.w600),
+                      ),
+                    ]),
+                  ),
+                  Switch(value: s.settings.serverOn, onChanged: s.setServerOn),
+                ]),
+              ),
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(
+                  child: _BigAction(
+                    icon: Icons.radar_rounded,
+                    label: s.scanning ? tr('Ищем… ${(s.scanProgress * 100).round()}%', 'Scanning… ${(s.scanProgress * 100).round()}%') : tr('Сканировать', 'Scan'),
+                    primary: true,
+                    onTap: s.scanning ? null : s.rescan,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _BigAction(
+                    icon: Icons.add_link_rounded,
+                    label: tr('Вручную', 'Manually'),
+                    onTap: () => showManualAddSheet(context, s, onOpen: (d, proto) => openBrowse(context, d, proto: proto)),
+                  ),
+                ),
+              ]),
+              if (s.scanning) ...[
+                const SizedBox(height: 10),
+                ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: s.scanProgress == 0 ? null : s.scanProgress, minHeight: 4)),
+              ],
+              if (!s.allFilesOk) ...[
+                const SizedBox(height: 14),
+                _PermCard(s: s),
+              ],
+              const SizedBox(height: 18),
+              if (favs.isNotEmpty) ...[
+                Text(tr('ИЗБРАННОЕ', 'FAVORITES'), style: TextStyle(color: t.muted, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 0.9)),
+                const SizedBox(height: 8),
+                for (final d in favs) tile(d),
+                const SizedBox(height: 8),
+              ],
+              Row(children: [
+                Text(tr('УСТРОЙСТВА', 'DEVICES'), style: TextStyle(color: t.muted, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 0.9)),
+                const Spacer(),
+                Text(tr('в сети: ${devs.where((d) => d.online).length}', 'online: ${devs.where((d) => d.online).length}'), style: TextStyle(color: t.muted, fontSize: 12)),
+              ]),
+              const SizedBox(height: 8),
+              if (devs.isEmpty)
+                GlassCard(
+                  padding: const EdgeInsets.all(22),
+                  child: Column(children: [
+                    Icon(Icons.radar_rounded, size: 40, color: t.muted),
+                    const SizedBox(height: 10),
+                    Text(
+                      s.netOnline
+                          ? tr('Пока никого нет. Нажмите «Сканировать» или подключитесь вручную по IP: роутер, приставка, ПК.', 'Nobody yet. Tap "Scan" or connect manually by IP: router, set-top box, PC.')
+                          : tr('Нет подключения к сети. Включите Wi-Fi - поиск начнётся сам.', 'No network. Turn on Wi-Fi - the search starts by itself.'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: t.muted),
+                    ),
+                  ]),
+                )
+              else
+                for (final d in rest) tile(d),
+              if (devs.isNotEmpty && rest.isEmpty && favs.isNotEmpty) const SizedBox.shrink(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BigAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool primary;
+  final VoidCallback? onTap;
+  const _BigAction({required this.icon, required this.label, this.primary = false, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    final fg = primary ? Colors.white : t.text;
+    return Opacity(
+      opacity: onTap == null ? 0.55 : 1,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Ink(
+            height: 54,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              gradient: primary ? t.gradient : null,
+              color: primary ? null : t.surface,
+              borderRadius: BorderRadius.circular(18),
+              border: primary ? null : Border.all(color: t.border),
+              boxShadow: primary ? [BoxShadow(color: t.accent.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 4))] : null,
+            ),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(icon, size: 21, color: primary ? Colors.white : t.accent2),
+              const SizedBox(width: 8),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(label, maxLines: 1, softWrap: false, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: fg)),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Вкладка «Получить»: большая пульсирующая иконка устройства и список принятых файлов.
@@ -227,16 +519,32 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             children: [
               const SizedBox(height: 18),
-              SizedBox(
-                height: 230,
-                child: AnimatedBuilder(
-                  animation: _anim,
-                  builder: (_, __) => CustomPaint(
-                    painter: _PulsePainter(_anim.value, on ? t.accent2 : t.muted, on),
-                    child: Center(child: Icon(Icons.wifi_tethering_rounded, size: 54, color: on ? Colors.white : t.muted)),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  if (s.scanning) {
+                    toast(context, tr('Уже ищем…', 'Already scanning…'));
+                    return;
+                  }
+                  toast(context, tr('Ищем устройства заново…', 'Searching for devices again…'));
+                  s.rescan();
+                },
+                child: SizedBox(
+                  height: 230,
+                  child: AnimatedBuilder(
+                    animation: _anim,
+                    builder: (_, __) => CustomPaint(
+                      painter: _PulsePainter(_anim.value, on ? t.accent2 : t.muted, on),
+                      child: Center(
+                        child: s.scanning
+                            ? const SizedBox(width: 40, height: 40, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white))
+                            : Icon(Icons.wifi_tethering_rounded, size: 54, color: on ? Colors.white : t.muted),
+                      ),
+                    ),
                   ),
                 ),
               ),
+              Center(child: Text(s.scanning ? tr('Идёт поиск…', 'Searching…') : tr('Нажмите на круг, чтобы искать заново', 'Tap the circle to search again'), style: TextStyle(color: t.muted, fontSize: 12))),
               Center(child: Text(s.myName, textAlign: TextAlign.center, style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w300))),
               const SizedBox(height: 6),
               Center(
@@ -250,9 +558,9 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
               const SizedBox(height: 8),
               Center(child: Switch(value: s.settings.serverOn, onChanged: s.setServerOn)),
               const SizedBox(height: 18),
-              if (s.devices.any((d) => !d.isSelf && d.online)) ...[
+              if (s.others.any((d) => d.online)) ...[
                 Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
-                  for (final d in s.sortedDevices.where((d) => !d.isSelf && d.online))
+                  for (final d in s.others.where((d) => d.online))
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(color: t.surface2, borderRadius: BorderRadius.circular(14), border: Border.all(color: d.has('nano') ? t.accent.withValues(alpha: 0.7) : t.border)),
@@ -294,7 +602,11 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
                 const Spacer(),
                 IconBtn(icon: Icons.refresh_rounded, tip: tr('Обновить', 'Refresh'), onTap: _reload),
               ]),
-              if (_dir.isNotEmpty) Text(_dir, style: TextStyle(color: t.muted, fontSize: 11.5)),
+              if (_dir.isNotEmpty)
+                Row(children: [
+                  Expanded(child: Text(_dir, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted, fontSize: 11.5))),
+                  SoftButton(label: tr('В папке', 'Open folder'), icon: Icons.folder_open_rounded, onTap: () => openFolderFlow(context, s, _dir)),
+                ]),
               const SizedBox(height: 8),
               if (_files.isEmpty)
                 GlassCard(
@@ -463,8 +775,24 @@ class SendPageState extends State<SendPage> {
     });
   }
 
-  Future<void> _browse(Device d, {List<FsEntry>? send}) async {
-    final r = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => BrowsePage(device: d, sendItems: send)));
+  bool get hasSelection => _sel.isNotEmpty;
+
+  String _destLabel(AppState s, Device d) {
+    final p = s.destFor(d);
+    if (p.isEmpty) return tr('Рабочий стол', 'Desktop');
+    final n = p.substring(p.lastIndexOf(RegExp(r'[\\/]')) + 1);
+    return n.isEmpty ? p : n;
+  }
+
+  /// Снять выбор (для жеста «назад»). true - выбор был и снят.
+  bool clearSelection() {
+    if (_sel.isEmpty) return false;
+    setState(_sel.clear);
+    return true;
+  }
+
+  Future<void> _browse(Device d, {List<FsEntry>? send, String? proto, bool ask = false}) async {
+    final r = await openBrowse(context, d, send: send, proto: proto, ask: ask);
     if (r == true && mounted) {
       setState(_sel.clear);
       widget.onSent();
@@ -482,41 +810,13 @@ class SendPageState extends State<SendPage> {
       await _browse(d, send: items);
       return;
     }
-    final t = NlScope.of(context);
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: t.surface2,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (sheet) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
-            child: Align(alignment: Alignment.centerLeft, child: Text(tr('Куда сохранить на «${d.title}»?', 'Where to save on "${d.title}"?'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
-          ),
-          ListTile(
-            leading: Icon(Icons.folder_open_rounded, color: t.accent2),
-            title: Text(tr('Выбрать папку…', 'Choose a folder…')),
-            subtitle: Text(tr('Откроется список папок устройства', "Opens the device's folders")),
-            onTap: () => Navigator.pop(sheet, 'pick'),
-          ),
-          ListTile(
-            leading: Icon(Icons.bolt_rounded, color: t.accent2),
-            title: Text(tr('Быстро: Загрузки/NanoLink', 'Quick: Downloads/NanoLink')),
-            onTap: () => Navigator.pop(sheet, 'quick'),
-          ),
-          const SizedBox(height: 8),
-        ]),
-      ),
-    );
-    if (choice == null || !mounted) return;
-    if (choice == 'pick') {
-      await _browse(d, send: items);
-      return;
-    }
-    toast(context, tr('Отправляем на «${d.title}»…', 'Sending to "${d.title}"…'));
+    // По умолчанию - сразу в запомненную папку или на «Рабочий стол» без вопросов.
     final err = await s.sendFiles(d, items);
     if (!mounted) return;
     if (err == null) {
+      final dest = s.lastSendDest;
+      final name = dest.substring(dest.lastIndexOf(RegExp(r'[\\/]')) + 1);
+      toast(context, tr('Отправляем на «${d.title}» → ${name.isEmpty ? dest : name}', 'Sending to "${d.title}" → ${name.isEmpty ? dest : name}'));
       setState(_sel.clear);
       widget.onSent();
     } else if (err == 'pick') {
@@ -527,119 +827,19 @@ class SendPageState extends State<SendPage> {
   }
 
   void _menu(Device d) {
-    final s = AppScope.of(context);
-    final t = NlScope.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: t.surface2,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (sheet) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
-            child: Row(children: [
-              Icon(kindIcon(d.kind), color: t.accent2),
-              const SizedBox(width: 12),
-              Expanded(child: Text(d.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
-            ]),
-          ),
-          ListTile(
-            leading: const Icon(Icons.folder_open_rounded),
-            title: Text(tr('Открыть файлы', 'Browse files')),
-            onTap: () {
-              Navigator.pop(sheet);
-              _browse(d);
-            },
-          ),
-          if (_sel.isNotEmpty)
-            ListTile(
-              leading: const Icon(Icons.drive_folder_upload_rounded),
-              title: Text(tr('Отправить в выбранную папку…', 'Send to a chosen folder…')),
-              onTap: () {
-                Navigator.pop(sheet);
-                _browse(d, send: List<FsEntry>.from(_sel));
-              },
-            ),
-          ListTile(
-            leading: Icon(d.favorite ? Icons.star_rounded : Icons.star_outline_rounded, color: d.favorite ? const Color(0xFFFFC940) : null),
-            title: Text(d.favorite ? tr('Убрать из избранного', 'Remove from favorites') : tr('В избранное', 'Add to favorites')),
-            onTap: () {
-              Navigator.pop(sheet);
-              d.favorite = !d.favorite;
-              s.updateDevice(d);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.tune_rounded),
-            title: Text(tr('Переименовать, настроить', 'Rename, settings')),
-            onTap: () {
-              Navigator.pop(sheet);
-              editDeviceDialog(context, s, d);
-            },
-          ),
-          if (d.host != null)
-            ListTile(
-              leading: const Icon(Icons.copy_rounded),
-              title: Text(tr('Скопировать адрес ${d.host}', 'Copy address ${d.host}')),
-              onTap: () {
-                Navigator.pop(sheet);
-                Clipboard.setData(ClipboardData(text: d.host!));
-              },
-            ),
-          const SizedBox(height: 8),
-        ]),
-      ),
+    showDeviceSheet(
+      context,
+      d,
+      sel: List<FsEntry>.from(_sel),
+      browse: ({List<FsEntry>? send, String? proto, bool ask = false}) => _browse(d, send: send, proto: proto, ask: ask),
     );
   }
 
   void _addSheet() {
     final s = AppScope.of(context);
-    final t = NlScope.of(context);
-    final c = TextEditingController();
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: t.surface2,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (sheet) => Padding(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(sheet).viewInsets.bottom),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(tr('Добавить устройство', 'Add a device'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 6),
-          Text(
-            tr('IP в вашей сети или адрес Tailscale (100.x) - так устройства видят друг друга даже через мобильный интернет.',
-                'An IP on your network or a Tailscale (100.x) address - this way devices see each other even over mobile data.'),
-            style: TextStyle(color: t.muted, fontSize: 12.5),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: c,
-            autofocus: true,
-            keyboardType: TextInputType.url,
-            decoration: InputDecoration(hintText: '192.168.1.50  /  100.64.1.5', prefixIcon: const Icon(Icons.lan_outlined)),
-            onSubmitted: (_) async {
-              Navigator.pop(sheet);
-              final r = await s.addManual(c.text);
-              if (mounted && r != null) toast(context, r);
-            },
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: GradientButton(
-              label: tr('Добавить', 'Add'),
-              icon: Icons.add_link_rounded,
-              onTap: () async {
-                Navigator.pop(sheet);
-                final r = await s.addManual(c.text);
-                if (mounted && r != null) toast(context, r);
-              },
-            ),
-          ),
-        ]),
-      ),
-    );
+    showManualAddSheet(context, s, onOpen: (d, proto) {
+      if (mounted) _browse(d, proto: proto);
+    });
   }
 
   @override
@@ -649,7 +849,7 @@ class SendPageState extends State<SendPage> {
       listenable: s,
       builder: (context, _) {
         final t = NlScope.of(context);
-        final devs = s.sortedDevices.where((d) => !d.isSelf).toList();
+        final devs = s.others;
         final ip = s.nics.isEmpty ? null : s.nics.first.ip;
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -762,6 +962,7 @@ class SendPageState extends State<SendPage> {
                   child: _DevTile(
                     d: d,
                     armed: _sel.isNotEmpty,
+                    dest: _sel.isNotEmpty && d.has('nano') ? _destLabel(s, d) : null,
                     onTap: () => _tap(d),
                     onLong: () => _menu(d),
                     onBrowse: () => _browse(d),
@@ -795,7 +996,7 @@ class _PickTile extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Icon(icon, size: 26, color: t.accent2),
               const SizedBox(height: 6),
-              Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1, softWrap: false, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700))),
             ]),
           ),
         ),
@@ -807,10 +1008,11 @@ class _PickTile extends StatelessWidget {
 class _DevTile extends StatelessWidget {
   final Device d;
   final bool armed;
+  final String? dest;
   final VoidCallback onTap;
   final VoidCallback onLong;
   final VoidCallback onBrowse;
-  const _DevTile({required this.d, required this.armed, required this.onTap, required this.onLong, required this.onBrowse});
+  const _DevTile({required this.d, required this.armed, this.dest, required this.onTap, required this.onLong, required this.onBrowse});
 
   @override
   Widget build(BuildContext context) {
@@ -846,6 +1048,8 @@ class _DevTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: t.muted, fontSize: 12),
                 ),
+                if (armed && online && dest != null)
+                  Text('→ $dest', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.accent2, fontSize: 12, fontWeight: FontWeight.w700)),
               ]),
             ),
             if (armed && online)
@@ -913,7 +1117,13 @@ class _PickerPageState extends State<PickerPage> {
   @override
   Widget build(BuildContext context) {
     final t = NlScope.of(context);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (!pane.back()) Navigator.of(context).pop();
+      },
+      child: Scaffold(
       backgroundColor: t.bg,
       appBar: AppBar(
         backgroundColor: t.bg,
@@ -967,6 +1177,7 @@ class _PickerPageState extends State<PickerPage> {
           );
         },
       ),
+      ),
     );
   }
 }
@@ -975,7 +1186,9 @@ class _PickerPageState extends State<PickerPage> {
 class BrowsePage extends StatefulWidget {
   final Device device;
   final List<FsEntry>? sendItems;
-  const BrowsePage({super.key, required this.device, this.sendItems});
+  final String? proto;
+  final bool ask;
+  const BrowsePage({super.key, required this.device, this.sendItems, this.proto, this.ask = false});
 
   @override
   State<BrowsePage> createState() => _BrowsePageState();
@@ -983,13 +1196,14 @@ class BrowsePage extends StatefulWidget {
 
 class _BrowsePageState extends State<BrowsePage> {
   late final PaneController pane = PaneController('br${widget.device.id}')..homeEnabled = true;
+  bool _remember = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final s = AppScope.of(context);
-      await connectFlow(context, s, pane, widget.device);
+      await connectFlow(context, s, pane, widget.device, proto: widget.proto, ask: widget.ask);
       if (!mounted) return;
       if (pane.error != null) toast(context, pane.error!);
       if (!pane.attached) Navigator.of(context).maybePop();
@@ -1009,6 +1223,7 @@ class _BrowsePageState extends State<BrowsePage> {
       toast(context, tr('Откройте папку назначения', 'Open a destination folder first'));
       return;
     }
+    if (_remember) s.setDest(widget.device, pane.path);
     s.transfers.enqueue(
       srcFactory: () => LocalVfs(),
       dstFactory: pane.factory!,
@@ -1038,15 +1253,15 @@ class _BrowsePageState extends State<BrowsePage> {
             child: Align(alignment: Alignment.centerLeft, child: Text(tr('Куда сохранить на этом устройстве?', 'Where to save on this device?'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
           ),
           ListTile(
-            leading: Icon(Icons.folder_open_rounded, color: t.accent2),
-            title: Text(tr('Выбрать папку…', 'Choose a folder…')),
-            onTap: () => Navigator.pop(sheet, 'pick'),
-          ),
-          ListTile(
             leading: Icon(Icons.bolt_rounded, color: t.accent2),
-            title: Text(tr('Быстро: папка приёма', 'Quick: receive folder')),
+            title: Text(tr('Папка приёма', 'Receive folder')),
             subtitle: Text(s.settings.inboxDir.isEmpty ? 'Загрузки/NanoLink' : s.settings.inboxDir),
             onTap: () => Navigator.pop(sheet, 'quick'),
+          ),
+          ListTile(
+            leading: Icon(Icons.folder_open_rounded, color: t.accent2),
+            title: Text(tr('Выбрать другую папку…', 'Choose another folder…')),
+            onTap: () => Navigator.pop(sheet, 'pick'),
           ),
           const SizedBox(height: 8),
         ]),
@@ -1079,83 +1294,111 @@ class _BrowsePageState extends State<BrowsePage> {
   Widget build(BuildContext context) {
     final t = NlScope.of(context);
     final send = widget.sendItems;
-    return Scaffold(
-      backgroundColor: t.bg,
-      appBar: AppBar(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (!pane.back()) Navigator.of(context).pop();
+      },
+      child: Scaffold(
         backgroundColor: t.bg,
-        elevation: 0,
-        title: ListenableBuilder(
-          listenable: pane,
-          builder: (_, __) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(widget.device.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-            Text(
-              pane.attached && pane.error == null && pane.entries.isNotEmpty
-                  ? tr('Файлы этого устройства · подключено', "This device's files · connected")
-                  : tr('Файлы этого устройства', "This device's files"),
-              style: TextStyle(color: pane.attached && pane.error == null && pane.entries.isNotEmpty ? const Color(0xFF3DDC84) : NlScope.of(context).muted, fontSize: 11.5, fontWeight: FontWeight.w700),
-            ),
-          ]),
-        ),
-        actions: [
-          ListenableBuilder(
+        appBar: AppBar(
+          backgroundColor: t.bg,
+          elevation: 0,
+          title: ListenableBuilder(
             listenable: pane,
-            builder: (_, __) => IconBtn(icon: pane.grid ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleGrid),
+            builder: (_, __) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(widget.device.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+              Text(
+                pane.attached && pane.error == null && pane.entries.isNotEmpty
+                    ? tr('Файлы этого устройства · подключено', "This device's files · connected")
+                    : tr('Файлы этого устройства', "This device's files"),
+                style: TextStyle(color: pane.attached && pane.error == null && pane.entries.isNotEmpty ? const Color(0xFF3DDC84) : NlScope.of(context).muted, fontSize: 11.5, fontWeight: FontWeight.w700),
+              ),
+            ]),
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-          child: PaneView(pane: pane, hideHeader: true, hideSelBar: true),
+          actions: [
+            ListenableBuilder(
+              listenable: pane,
+              builder: (_, __) => IconBtn(icon: pane.grid ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleGrid),
+            ),
+          ],
         ),
-      ),
-      bottomNavigationBar: ListenableBuilder(
-        listenable: pane,
-        builder: (context, _) {
-          if (send != null) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: GradientButton(
-                    label: tr('Отправить сюда · ${send.length}', 'Send here · ${send.length}'),
-                    icon: Icons.send_rounded,
-                    onTap: pane.attached && !pane.home ? _sendHere : null,
-                  ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: PaneView(pane: pane, hideHeader: true, hideSelBar: true),
+          ),
+        ),
+        bottomNavigationBar: ListenableBuilder(
+          listenable: pane,
+          builder: (context, _) {
+            if (send != null) {
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => setState(() => _remember = !_remember),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(children: [
+                          Checkbox(value: _remember, onChanged: (v) => setState(() => _remember = v ?? false), visualDensity: VisualDensity.compact),
+                          Expanded(
+                            child: Text(
+                              tr('Запомнить эту папку для «${widget.device.title}»', 'Remember this folder for "${widget.device.title}"'),
+                              style: TextStyle(color: t.muted, fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                    SizedBox(
+                      width: double.infinity,
+                      child: GradientButton(
+                        label: tr('Отправить сюда · ${send.length}', 'Send here · ${send.length}'),
+                        icon: Icons.send_rounded,
+                        onTap: pane.attached && !pane.home ? _sendHere : null,
+                      ),
+                    ),
+                  ]),
                 ),
+              );
+            }
+            final n = pane.selected.length;
+            if (n == 0) return const SizedBox.shrink();
+            return SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 8, 8, 10),
+                decoration: BoxDecoration(color: t.surface2, border: Border(top: BorderSide(color: t.border))),
+                child: Row(children: [
+                  Text(tr('Выбрано: $n', 'Selected: $n'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                  const Spacer(),
+                  IconBtn(
+                    icon: Icons.delete_outline_rounded,
+                    tip: tr('Удалить', 'Delete'),
+                    onTap: () async {
+                      final ok = await confirmDialog(context, tr('Удалить выбранное?', 'Delete selected?'), tr('Будет удалено объектов: $n. Это нельзя отменить.', 'Items to delete: $n. This cannot be undone.'), okLabel: tr('Удалить', 'Delete'));
+                      if (!ok) return;
+                      try {
+                        await pane.deleteSelected();
+                      } catch (err) {
+                        if (context.mounted) toast(context, friendlyError(err));
+                      }
+                    },
+                  ),
+                  IconBtn(icon: Icons.close_rounded, tip: tr('Снять выбор', 'Clear'), onTap: pane.clearSelection),
+                  // Скачивать «на телефон» имеет смысл только с чужого устройства
+                  if (!pane.isLocal) ...[
+                    const SizedBox(width: 4),
+                    GradientButton(compact: true, label: tr('Скачать', 'Download'), icon: Icons.download_rounded, onTap: _download),
+                  ],
+                ]),
               ),
             );
-          }
-          final n = pane.selected.length;
-          if (n == 0) return const SizedBox.shrink();
-          return SafeArea(
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 8, 8, 10),
-              decoration: BoxDecoration(color: t.surface2, border: Border(top: BorderSide(color: t.border))),
-              child: Row(children: [
-                Text(tr('Выбрано: $n', 'Selected: $n'), style: const TextStyle(fontWeight: FontWeight.w800)),
-                const Spacer(),
-                IconBtn(
-                  icon: Icons.delete_outline_rounded,
-                  tip: tr('Удалить', 'Delete'),
-                  onTap: () async {
-                    final ok = await confirmDialog(context, tr('Удалить выбранное?', 'Delete selected?'), tr('Будет удалено объектов: $n. Это нельзя отменить.', 'Items to delete: $n. This cannot be undone.'), okLabel: tr('Удалить', 'Delete'));
-                    if (!ok) return;
-                    try {
-                      await pane.deleteSelected();
-                    } catch (err) {
-                      if (context.mounted) toast(context, friendlyError(err));
-                    }
-                  },
-                ),
-                IconBtn(icon: Icons.close_rounded, tip: tr('Снять выбор', 'Clear'), onTap: pane.clearSelection),
-                const SizedBox(width: 4),
-                GradientButton(compact: true, label: tr('Скачать на телефон', 'Download to phone'), icon: Icons.download_rounded, onTap: _download),
-              ]),
-            ),
-          );
-        },
+          },
+        ),
       ),
     );
   }

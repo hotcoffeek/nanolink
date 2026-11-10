@@ -50,6 +50,34 @@ class Incoming {
   Incoming(this.from, this.name, this.done, this.total);
 }
 
+/// Запись в истории принятых файлов.
+class HistItem {
+  final String name;
+  final String path;
+  final String from;
+  final int size;
+  final int at;
+  HistItem(this.name, this.path, this.from, this.size, this.at);
+
+  Map<String, dynamic> toJson() => {'n': name, 'p': path, 'f': from, 's': size, 't': at};
+
+  factory HistItem.fromJson(Map<String, dynamic> j) => HistItem(
+        (j['n'] ?? '').toString(),
+        (j['p'] ?? '').toString(),
+        (j['f'] ?? '').toString(),
+        (j['s'] as num?)?.toInt() ?? 0,
+        (j['t'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// Результат ручного добавления устройства по адресу.
+class ManualResult {
+  final String? error;
+  final String? note;
+  final Device? device;
+  ManualResult({this.error, this.note, this.device});
+}
+
 const List<String> kProtoPriority = ['nano', 'smb', 'sftp', 'ftp'];
 
 String protoLabel(String p) {
@@ -71,6 +99,7 @@ class AppState extends ChangeNotifier implements Hub {
   Settings settings = Settings();
   final List<Device> devices = [];
   final Map<String, String> _trusted = {};
+  final List<HistItem> history = [];
 
   String _myId = '';
   DeviceKind _myKind = DeviceKind.pc;
@@ -141,6 +170,14 @@ class AppState extends ChangeNotifier implements Hub {
     final tr0 = d['trusted'];
     if (tr0 is Map) {
       tr0.forEach((k, v) => _trusted[k.toString()] = v.toString());
+    }
+    final hl = d['history'];
+    if (hl is List) {
+      for (final x in hl) {
+        try {
+          history.add(HistItem.fromJson(Map<String, dynamic>.from(x as Map)));
+        } catch (_) {}
+      }
     }
     final dl = d['devices'];
     if (dl is List) {
@@ -232,6 +269,7 @@ class AppState extends ChangeNotifier implements Hub {
         'settings': settings.toJson(),
         'trusted': _trusted,
         'devices': devices.map((e) => e.toJson()).toList(),
+        'history': history.take(200).map((e) => e.toJson()).toList(),
       });
     });
   }
@@ -326,6 +364,25 @@ class AppState extends ChangeNotifier implements Hub {
     return l;
   }
 
+  /// Это наше же устройство (по id или по одному из наших адресов).
+  bool isOwn(Device d) {
+    if (d.isSelf || d.id == _myId) return true;
+    final h = d.host;
+    if (h == null) return false;
+    return nics.any((n) => n.ip == h);
+  }
+
+  /// Все устройства кроме нашего собственного, в стабильном порядке.
+  List<Device> get others => sortedDevices.where((d) => !isOwn(d)).toList();
+
+  /// Повторный поиск: сигналы NanoLink + сканирование сети (по нажатию на пульсирующий круг).
+  Future<void> rescan() async {
+    try {
+      discovery.announce();
+    } catch (_) {}
+    await scan();
+  }
+
   List<String> protosOf(Device d) => kProtoPriority.where(d.services.containsKey).toList();
 
   void updateDevice(Device d) {
@@ -394,32 +451,47 @@ class AppState extends ChangeNotifier implements Hub {
     return dir;
   }
 
-  /// Отправить файлы на устройство одним нажатием (папка «Загрузки/NanoLink» на той стороне).
+  /// Куда ушла последняя быстрая отправка (для подсказки).
+  String lastSendDest = '';
+
+  /// Отправить файлы на устройство одним нажатием: в запомненную папку, а если её нет -
+  /// на «Рабочий стол» (или «Загрузки/NanoLink», когда рабочего стола нет).
   /// Возвращает текст ошибки или null; 'pick' - нужно выбрать папку вручную.
   Future<String?> sendFiles(Device d, List<FsEntry> items) async {
     if (items.isEmpty) return tr('Ничего не выбрано', 'Nothing selected');
     if (!d.has('nano')) return 'pick';
     Vfs mk() => makeVfs(d, 'nano');
     final v = mk();
-    var dir = '';
+    var dir = settings.dests[d.id] ?? '';
     try {
-      for (final p in await v.places()) {
-        if (p.icon == 'downloads') {
-          dir = p.path;
-          break;
+      if (dir.isEmpty) {
+        final pl = await v.places();
+        for (final p in pl) {
+          if (p.icon == 'desktop') {
+            dir = p.path;
+            break;
+          }
+        }
+        if (dir.isEmpty) {
+          for (final p in pl) {
+            if (p.icon == 'downloads') {
+              dir = v.join(p.path, 'NanoLink');
+              try {
+                await v.mkdir(dir);
+              } catch (_) {}
+              break;
+            }
+          }
+        }
+        if (dir.isEmpty) {
+          final st = await v.start();
+          if (st.isNotEmpty && st != '/') dir = st;
         }
       }
-      if (dir.isEmpty) dir = await v.start();
-    } catch (_) {}
-    if (dir.isEmpty || dir == '/') {
-      await v.close();
-      return 'pick';
-    }
-    dir = v.join(dir, 'NanoLink');
-    try {
-      await v.mkdir(dir);
     } catch (_) {}
     await v.close();
+    if (dir.isEmpty || dir == '/') return 'pick';
+    lastSendDest = dir;
     transfers.enqueue(
       srcFactory: () => LocalVfs(),
       dstFactory: mk,
@@ -599,6 +671,14 @@ class AppState extends ChangeNotifier implements Hub {
     lastFrom = from;
     lastFile = path;
     receivedTick++;
+    var size = 0;
+    try {
+      size = File(path).lengthSync();
+    } catch (_) {}
+    history.removeWhere((h) => h.path == path);
+    history.insert(0, HistItem(path.substring(path.lastIndexOf('/') + 1), path, from, size, DateTime.now().millisecondsSinceEpoch));
+    if (history.length > 200) history.removeRange(200, history.length);
+    saveSoon();
     if (!foreground) {
       Native.notify(tr('Получено от $from', 'Received from $from'), path.substring(path.lastIndexOf('/') + 1), id: 1);
     }
@@ -629,8 +709,14 @@ class AppState extends ChangeNotifier implements Hub {
   @override
   Future<bool> askReceive(String from, String id, String file) {
     if (!settings.askReceive) return Future<bool>.value(true);
+    // «Принять» действует только на файлы одной отправки: пока идёт приём от этого устройства
+    // и ещё несколько секунд после. Повторная отправка спросит снова.
     final ok = _recvOk[id];
-    if (ok != null && DateTime.now().difference(ok).inSeconds < 120) return Future<bool>.value(true);
+    final busy = incoming.values.any((i) => i.from == from);
+    if (ok != null && (busy || DateTime.now().difference(ok).inSeconds < 10)) {
+      _recvOk[id] = DateTime.now();
+      return Future<bool>.value(true);
+    }
     for (final w in _recvQ) {
       if (w.req.id == id) return w.done.future;
     }
@@ -653,6 +739,46 @@ class AppState extends ChangeNotifier implements Hub {
     final w = _recvQ.removeAt(0);
     if (ok) _recvOk[w.req.id] = DateTime.now();
     if (!w.done.isCompleted) w.done.complete(ok);
+    notifyListeners();
+  }
+
+  void removeHistory(HistItem h) {
+    history.remove(h);
+    saveSoon();
+    notifyListeners();
+  }
+
+  void clearHistory() {
+    history.clear();
+    saveSoon();
+    notifyListeners();
+  }
+
+  /// Запомненная папка назначения на устройстве [d] (пусто - по умолчанию: Рабочий стол).
+  String destFor(Device d) => settings.dests[d.id] ?? '';
+
+  void setDest(Device d, String path) {
+    settings.dests[d.id] = path;
+    saveSoon();
+    notifyListeners();
+  }
+
+  void clearDest(String deviceId) {
+    settings.dests.remove(deviceId);
+    saveSoon();
+    notifyListeners();
+  }
+
+  void clearAllDests() {
+    settings.dests.clear();
+    saveSoon();
+    notifyListeners();
+  }
+
+  void setFolderApp(String pkg, String label) {
+    settings.folderApp = pkg;
+    settings.folderAppLabel = label;
+    saveSoon();
     notifyListeners();
   }
 
@@ -870,6 +996,47 @@ class AppState extends ChangeNotifier implements Hub {
     unawaited(applyBind());
     notifyListeners();
     return null;
+  }
+
+  Device? _byHost(String h) {
+    for (final e in devices) {
+      if (!e.isSelf && e.host == h) return e;
+    }
+    return null;
+  }
+
+  /// Ручное подключение: адрес, протокол (auto/nano/ftp/sftp/smb), порт, логин и пароль.
+  Future<ManualResult> addManualEx(String host, String proto, {int port = 0, String user = '', String pass = ''}) async {
+    final t = host.trim();
+    if (!RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(t)) {
+      return ManualResult(error: tr('Введите IP (192.168.1.50 или 100.x от Tailscale) или имя', 'Enter an IP (192.168.1.50 or Tailscale 100.x) or a name'));
+    }
+    if (proto == 'auto' || proto == 'nano') {
+      final r = await addManual(t);
+      return ManualResult(note: r, device: _byHost(t));
+    }
+    await localNics(fresh: true);
+    final defPort = proto == 'ftp' ? 21 : (proto == 'sftp' ? 22 : 445);
+    final use = port > 0 ? port : defPort;
+    final open = await portOpen(t, use, ms: 3000);
+    var d = _byHost(t);
+    if (d == null) {
+      d = Device(id: 'ip:$t', name: t, host: t);
+      devices.add(d);
+    }
+    final defUser = proto == 'ftp' ? 'anonymous' : (proto == 'sftp' ? 'deck' : 'guest');
+    d.services[proto] = {'port': use, 'user': user.trim().isEmpty ? defUser : user.trim(), 'pass': pass, 'configured': true};
+    if (open) {
+      d.online = true;
+      d.aliveAt = DateTime.now().millisecondsSinceEpoch;
+    }
+    saveSoon();
+    unawaited(applyBind());
+    notifyListeners();
+    return ManualResult(
+      device: d,
+      note: open ? null : tr('Порт $use не отвечает - устройство добавлено, но подключиться может не получиться. Проверьте адрес, порт и что сервис включён.', 'Port $use is not answering - the device is added but connecting may fail. Check the address, the port and that the service is on.'),
+    );
   }
 
   // --- Самолечение ----------------------------------------------------

@@ -293,7 +293,7 @@ Future<void> editDeviceDialog(BuildContext ctx, AppState s, Device d) async {
 }
 
 /// Выбор протокола, логина и подключение устройства в панель.
-Future<void> connectFlow(BuildContext ctx, AppState s, PaneController pane, Device d) async {
+Future<void> connectFlow(BuildContext ctx, AppState s, PaneController pane, Device d, {String? proto, bool ask = false}) async {
   if (d.isSelf) {
     await s.openLocal(pane);
     return;
@@ -304,24 +304,47 @@ Future<void> connectFlow(BuildContext ctx, AppState s, PaneController pane, Devi
     protos = s.protosOf(d);
     if (protos.isEmpty) return;
   }
-  String? proto;
-  if (protos.length == 1) {
-    proto = protos.first;
-  } else if (ctx.mounted) {
-    proto = await pickProto(ctx, s, d, protos);
+  String? use = proto;
+  if (use == null || !protos.contains(use)) {
+    use = null;
+    if (!ask) {
+      if (protos.contains('nano')) {
+        use = 'nano'; // NanoLink есть - всегда им, не спрашиваем
+      } else if (d.prefProto != null && protos.contains(d.prefProto)) {
+        use = d.prefProto;
+      } else if (protos.length == 1) {
+        use = protos.first;
+      }
+    }
+    if (use == null && ctx.mounted) use = await pickProto(ctx, s, d, protos);
   }
-  if (proto == null) return;
-  if (proto != 'nano' && d.services[proto]?['configured'] != true && ctx.mounted) {
-    final ok = await credsDialog(ctx, s, d, proto);
+  if (use == null) return;
+  if (protos.length > 1 && d.prefProto != use) {
+    d.prefProto = use;
+    s.updateDevice(d);
+  }
+  if (use != 'nano' && d.services[use]?['configured'] != true && ctx.mounted) {
+    final ok = await credsDialog(ctx, s, d, use);
     if (!ok) return;
   }
-  await s.connect(pane, d, proto);
+  await s.connect(pane, d, use);
 }
 
 /// «Устройство хочет отправить вам файл» - принять или отклонить.
+bool _recvShowing = false;
+
 Future<void> showRecvDialog(BuildContext ctx, AppState s) async {
   final req = s.pendingRecv;
-  if (req == null) return;
+  if (req == null || _recvShowing) return;
+  _recvShowing = true;
+  try {
+    await _showRecv(ctx, s, req);
+  } finally {
+    _recvShowing = false;
+  }
+}
+
+Future<void> _showRecv(BuildContext ctx, AppState s, RecvRequest req) async {
   await showDialog<void>(
     context: ctx,
     barrierDismissible: false,
@@ -332,7 +355,7 @@ Future<void> showRecvDialog(BuildContext ctx, AppState s) async {
         const SizedBox(height: 8),
         Text(req.file),
         const SizedBox(height: 10),
-        Text(tr('Если принять, остальные файлы от этого устройства в течение 2 минут принимаются без вопросов.', 'If you accept, the other files from this device in the next 2 minutes are accepted without asking.'),
+        Text(tr('Остальные файлы этой же отправки примутся без вопросов. Следующая отправка спросит снова.', 'The rest of this same transfer is accepted without asking. The next transfer asks again.'),
             style: TextStyle(color: NlScope.of(dctx).muted, fontSize: 12.5)),
       ]),
       actions: [
@@ -351,6 +374,98 @@ Future<void> showRecvDialog(BuildContext ctx, AppState s) async {
           child: Text(tr('Принять', 'Accept')),
         ),
       ],
+    ),
+  );
+}
+
+
+/// Ручное подключение: адрес, протокол, порт, логин и пароль (FTP / SFTP / SMB / NanoLink).
+Future<void> showManualAddSheet(BuildContext ctx, AppState s, {required void Function(Device d, String? proto) onOpen}) {
+  final t = NlScope.of(ctx);
+  final host = TextEditingController();
+  final port = TextEditingController();
+  final user = TextEditingController();
+  final pass = TextEditingController();
+  var proto = 'auto';
+  var busy = false;
+  return showModalBottomSheet<void>(
+    context: ctx,
+    isScrollControlled: true,
+    backgroundColor: t.surface2,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (sheet) => StatefulBuilder(
+      builder: (sheet, setS) {
+        final plain = proto == 'ftp' || proto == 'sftp' || proto == 'smb';
+        final defPort = proto == 'ftp' ? '21' : (proto == 'sftp' ? '22' : (proto == 'smb' ? '445' : ''));
+        final defUser = proto == 'ftp' ? 'anonymous' : (proto == 'sftp' ? 'deck' : 'guest');
+        Future<void> go() async {
+          if (busy) return;
+          setS(() => busy = true);
+          final r = await s.addManualEx(host.text, proto, port: int.tryParse(port.text.trim()) ?? 0, user: user.text, pass: pass.text);
+          if (!sheet.mounted) return;
+          if (r.error != null || r.device == null) {
+            setS(() => busy = false);
+            toast(sheet, r.error ?? r.note ?? tr('Не удалось добавить устройство', 'Could not add the device'));
+            return;
+          }
+          Navigator.pop(sheet);
+          if (r.note != null && ctx.mounted) toast(ctx, r.note!);
+          onOpen(r.device!, plain ? proto : null);
+        }
+
+        return Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(sheet).viewInsets.bottom),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr('Подключиться вручную', 'Connect manually'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              Text(
+                tr('IP или имя устройства: роутер, приставка, ПК, адрес Tailscale (100.x). Выберите протокол и при необходимости порт, логин и пароль.',
+                    'IP or device name: router, set-top box, PC, Tailscale address (100.x). Pick a protocol and, if needed, port, login and password.'),
+                style: TextStyle(color: t.muted, fontSize: 12.5),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: host,
+                autofocus: true,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(hintText: '192.168.1.1  /  100.64.1.5', prefixIcon: Icon(Icons.lan_outlined)),
+              ),
+              const SizedBox(height: 12),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final p in const ['auto', 'nano', 'ftp', 'sftp', 'smb'])
+                  ChoiceChip(
+                    label: Text(p == 'auto' ? tr('Авто', 'Auto') : protoLabel(p)),
+                    selected: proto == p,
+                    onSelected: (_) => setS(() => proto = p),
+                  ),
+              ]),
+              if (plain) ...[
+                const SizedBox(height: 12),
+                Row(children: [
+                  SizedBox(
+                    width: 110,
+                    child: TextField(controller: port, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr('Порт', 'Port'), hintText: defPort)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: TextField(controller: user, decoration: InputDecoration(labelText: tr('Логин', 'Login'), hintText: defUser))),
+                ]),
+                const SizedBox(height: 10),
+                TextField(controller: pass, obscureText: true, decoration: InputDecoration(labelText: tr('Пароль', 'Password'))),
+              ],
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: GradientButton(
+                  label: busy ? tr('Подключаемся…', 'Connecting…') : tr('Подключиться', 'Connect'),
+                  icon: Icons.link_rounded,
+                  onTap: busy ? null : go,
+                ),
+              ),
+            ]),
+          ),
+        );
+      },
     ),
   );
 }

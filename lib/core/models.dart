@@ -66,6 +66,7 @@ class Device {
   String? hostname;
   Map<String, Map<String, dynamic>> services;
   int lastSeen;
+  String? prefProto; // последний выбранный протокол (чтобы не спрашивать каждый раз)
 
   // runtime
   bool online = false;
@@ -113,6 +114,7 @@ class Device {
         'hostname': hostname,
         'services': services,
         'seen': lastSeen,
+        'pp': prefProto,
       };
 
   factory Device.fromJson(Map<String, dynamic> j) {
@@ -134,7 +136,7 @@ class Device {
       hostname: j['hostname'] as String?,
       services: sv,
       lastSeen: (j['seen'] as num?)?.toInt() ?? 0,
-    );
+    )..prefProto = j['pp'] as String?;
   }
 }
 

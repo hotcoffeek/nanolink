@@ -33,7 +33,13 @@ class _FolderPickPageState extends State<FolderPickPage> {
   Widget build(BuildContext context) {
     final t = NlScope.of(context);
     final s = AppScope.of(context);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (!pane.back()) Navigator.of(context).pop();
+      },
+      child: Scaffold(
       backgroundColor: t.bg,
       appBar: AppBar(backgroundColor: t.bg, elevation: 0, title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.w800))),
       body: SafeArea(
@@ -77,6 +83,135 @@ class _FolderPickPageState extends State<FolderPickPage> {
           ),
         ),
       ),
+      ),
     );
   }
+}
+
+/// Встроенный проводник для папки на этом телефоне (например, «Показать в папке» после приёма).
+class FolderViewPage extends StatefulWidget {
+  final String path;
+  const FolderViewPage({super.key, required this.path});
+
+  @override
+  State<FolderViewPage> createState() => _FolderViewPageState();
+}
+
+class _FolderViewPageState extends State<FolderViewPage> {
+  final PaneController pane = PaneController('fview');
+
+  @override
+  void initState() {
+    super.initState();
+    pane.attach(LocalVfs(), () => LocalVfs(), null).then((_) {
+      if (mounted) pane.cd(widget.path);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    final name = widget.path.substring(widget.path.lastIndexOf('/') + 1);
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (!pane.back()) Navigator.of(context).pop();
+      },
+      child: Scaffold(
+        backgroundColor: t.bg,
+        appBar: AppBar(
+          backgroundColor: t.bg,
+          elevation: 0,
+          title: Text(name.isEmpty ? widget.path : name, style: const TextStyle(fontWeight: FontWeight.w800)),
+          actions: [
+            ListenableBuilder(
+              listenable: pane,
+              builder: (_, __) => IconBtn(icon: pane.grid ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleGrid),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: PaneView(pane: pane, hideHeader: true, hideSelBar: true, hideCats: true),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Выбор приложения, в котором открывать папки. Возвращает [пакет, название] или null.
+/// Пакет 'nanolink' - встроенный проводник. [forceRemember] - всегда запоминать (из настроек).
+Future<List<String>?> chooseFolderApp(BuildContext ctx, AppState s, String samplePath, {bool forceRemember = false}) async {
+  final apps = await Native.listFolderApps(samplePath);
+  if (!ctx.mounted) return null;
+  final t = NlScope.of(ctx);
+  var remember = true;
+  return showModalBottomSheet<List<String>>(
+    context: ctx,
+    backgroundColor: t.surface2,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (sheet) => StatefulBuilder(
+      builder: (sheet, setS) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(tr('Чем открывать папки?', 'Open folders with?'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              ),
+            ),
+            ListTile(
+              leading: Icon(Icons.bolt_rounded, color: t.accent2),
+              title: const Text('NanoLink'),
+              subtitle: Text(tr('Встроенный проводник: фото и видео открываются прямо там', 'Built-in explorer: photos and videos open right there')),
+              onTap: () {
+                if (remember || forceRemember) s.setFolderApp('nanolink', 'NanoLink');
+                Navigator.pop(sheet, ['nanolink', 'NanoLink']);
+              },
+            ),
+            for (final a in apps)
+              ListTile(
+                leading: Icon(Icons.folder_rounded, color: t.accent2),
+                title: Text(a['label'] ?? a['pkg'] ?? ''),
+                subtitle: Text(a['pkg'] ?? '', style: TextStyle(color: t.muted, fontSize: 11.5)),
+                onTap: () {
+                  if (remember || forceRemember) s.setFolderApp(a['pkg'] ?? '', a['label'] ?? '');
+                  Navigator.pop(sheet, [a['pkg'] ?? '', a['label'] ?? '']);
+                },
+              ),
+            if (!forceRemember)
+              CheckboxListTile(
+                value: remember,
+                onChanged: (v) => setS(() => remember = v ?? true),
+                title: Text(tr('Запомнить выбор', 'Remember my choice')),
+                subtitle: Text(tr('Изменить можно в настройках', 'Can be changed in settings')),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            const SizedBox(height: 8),
+          ]),
+        ),
+      ),
+    ),
+  );
+}
+
+/// «Показать в папке»: открывает [path] в выбранном приложении (спросит один раз и запомнит).
+Future<void> openFolderFlow(BuildContext ctx, AppState s, String path) async {
+  var app = s.settings.folderApp;
+  if (app.isEmpty) {
+    final r = await chooseFolderApp(ctx, s, path);
+    if (r == null || !ctx.mounted) return;
+    app = r[0];
+  }
+  if (app != 'nanolink') {
+    final ok = await Native.openFolder(path, pkg: app);
+    if (ok) return;
+    if (ctx.mounted) toast(ctx, tr('Это приложение не смогло открыть папку - открываем в NanoLink', 'That app could not open the folder - opening in NanoLink'));
+  }
+  if (ctx.mounted) await Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => FolderViewPage(path: path)));
 }

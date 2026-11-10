@@ -39,6 +39,8 @@ class PaneController extends ChangeNotifier {
   bool grid = false;
   bool homeEnabled = false; // показывать стартовый экран с плитками
   bool home = false;
+  bool _catFromHome = false;
+  Cat? _fromCat; // из какой категории открыт альбом
   bool pickMode = false; // в режиме выбора тап по файлу выделяет его
   String sort = 'name';
   bool asc = true;
@@ -136,6 +138,7 @@ class PaneController extends ChangeNotifier {
   Future<void> cd(String p, {bool keepFilter = false}) async {
     if (vfs == null) return;
     home = false;
+    if (!keepFilter) _fromCat = null;
     path = p;
     if (!keepFilter) filter = null;
     cat = keepFilter ? cat : null;
@@ -169,7 +172,9 @@ class PaneController extends ChangeNotifier {
   }
 
   Future<void> openCategory(Cat c, {bool force = false}) async {
+    if (cat == null) _catFromHome = home;
     home = false;
+    _fromCat = null;
     cat = c;
     filter = catExt[c];
     selected.clear();
@@ -213,12 +218,44 @@ class PaneController extends ChangeNotifier {
   void closeCategory() {
     cat = null;
     filter = null;
+    if (_catFromHome && homeEnabled) home = true;
+    _catFromHome = false;
     notifyListeners();
+  }
+
+  /// Шаг назад (жест «назад» на телефоне): снять выбор → закрыть альбом/категорию →
+  /// на папку выше → на главную. false - дальше некуда, можно закрывать экран.
+  bool back() {
+    if (selected.isNotEmpty) {
+      clearSelection();
+      return true;
+    }
+    if (cat != null) {
+      closeCategory();
+      return true;
+    }
+    if (_fromCat != null) {
+      final c = _fromCat!;
+      _fromCat = null;
+      unawaited(openCategory(c));
+      return true;
+    }
+    if (home) return false;
+    if (canGoUp) {
+      unawaited(up());
+      return true;
+    }
+    if (homeEnabled) {
+      goHome();
+      return true;
+    }
+    return false;
   }
 
   Future<void> openAlbum(Album a) async {
     home = false;
     final c = cat;
+    _fromCat = c;
     cat = null; // показываем обычный список, но с фильтром по расширению
     filter = c == null ? null : catExt[c];
     path = a.path;

@@ -64,6 +64,16 @@ class Native {
     return [(r[0] as num).toInt(), (r[1] as num).toInt()];
   }
 
+  /// Приложения, умеющие открывать папки: [{pkg, label}].
+  static Future<List<Map<String, String>>> listFolderApps(String path) async {
+    final r = await _call<List<dynamic>>('listFolderApps', {'path': path});
+    if (r == null) return const [];
+    return r.map((e) => Map<String, String>.from((e as Map).map((k, v) => MapEntry(k.toString(), v.toString())))).toList();
+  }
+
+  /// Открыть папку в стороннем файловом менеджере ([pkg] пусто - любой подходящий).
+  static Future<bool> openFolder(String path, {String pkg = ''}) async => (await _call<bool>('openFolder', {'path': path, 'pkg': pkg})) ?? false;
+
   static Future<List<String>> takeShared() async {
     final r = await _call<List<dynamic>>('takeShared');
     return r == null ? <String>[] : r.map((e) => e.toString()).toList();
