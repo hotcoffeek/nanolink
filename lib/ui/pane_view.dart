@@ -38,7 +38,8 @@ class PaneView extends StatelessWidget {
   final PaneController pane;
   final bool hideHeader;
   final bool hideSelBar;
-  const PaneView({super.key, required this.pane, this.hideHeader = false, this.hideSelBar = false});
+  final bool hideCats;
+  const PaneView({super.key, required this.pane, this.hideHeader = false, this.hideSelBar = false, this.hideCats = false});
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +64,7 @@ class PaneView extends StatelessWidget {
             builder: (context, _) => Column(children: [
               if (!hideHeader) _Header(pane: pane),
               _PathBar(pane: pane),
-              _Strip(pane: pane),
+              _Strip(pane: pane, hideCats: hideCats),
               Expanded(
                 child: Stack(children: [
                   Positioned.fill(child: _Body(pane: pane)),
@@ -249,14 +250,15 @@ class _PathBar extends StatelessWidget {
 
 class _Strip extends StatelessWidget {
   final PaneController pane;
-  const _Strip({required this.pane});
+  final bool hideCats;
+  const _Strip({required this.pane, this.hideCats = false});
 
   @override
   Widget build(BuildContext context) {
     if (!pane.attached) return const SizedBox.shrink();
     final chips = <Widget>[];
-    {
-      chips.add(SoftButton(
+    if (!hideCats) {
+      chips.add(_StripChip(
         label: tr('Файлы', 'Files'),
         icon: Icons.folder_open_rounded,
         selected: pane.filter == null && pane.cat == null,
@@ -273,7 +275,7 @@ class _Strip extends StatelessWidget {
         MapEntry(Cat.docs, MapEntry(tr('Документы', 'Docs'), Icons.article_rounded)),
       ];
       for (final d in defs) {
-        chips.add(SoftButton(
+        chips.add(_StripChip(
           label: d.value.key,
           icon: d.value.value,
           selected: pane.filter != null && identical(pane.filter, catExt[d.key]),
@@ -282,7 +284,7 @@ class _Strip extends StatelessWidget {
       }
     }
     for (final pl in pane.places) {
-      chips.add(SoftButton(
+      chips.add(_StripChip(
         label: pl.name,
         icon: placeIcon(pl.icon),
         onTap: () {
@@ -293,10 +295,10 @@ class _Strip extends StatelessWidget {
     }
     if (chips.isEmpty) return const SizedBox.shrink();
     return SizedBox(
-      height: 44,
+      height: 54,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+        padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
         itemCount: chips.length,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (_, i) => chips[i],
@@ -414,7 +416,7 @@ Future<void> _tapEntry(BuildContext context, PaneController pane, FsEntry e) asy
     await pane.cd(e.path, keepFilter: pane.filter != null);
     return;
   }
-  if (pane.selected.isNotEmpty) {
+  if (pane.selected.isNotEmpty || pane.pickMode) {
     pane.toggle(e);
     return;
   }
@@ -444,8 +446,15 @@ class _RowTile extends StatelessWidget {
         color: sel ? t.accent.withValues(alpha: 0.14) : Colors.transparent,
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Row(children: [
-          Checkbox(value: sel, onChanged: (_) => pane.toggle(e), visualDensity: VisualDensity.compact),
-          SizedBox(width: 38, height: 38, child: Center(child: _thumb(pane, e, 36, st))),
+          const SizedBox(width: 6),
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: Stack(clipBehavior: Clip.none, children: [
+              Center(child: _thumb(pane, e, 36, st)),
+              if (sel) Positioned(right: -4, bottom: -4, child: Icon(Icons.check_circle_rounded, size: 19, color: t.accent2)),
+            ]),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -504,11 +513,7 @@ class _GridTile extends StatelessWidget {
               child: Text(e.name, maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
             ),
           ]),
-          Positioned(
-            left: 2,
-            top: 2,
-            child: Checkbox(value: sel, onChanged: (_) => pane.toggle(e), visualDensity: VisualDensity.compact),
-          ),
+          if (sel) Positioned(left: 6, top: 6, child: Icon(Icons.check_circle_rounded, size: 22, color: t.accent2)),
         ]),
       ),
     );
@@ -534,6 +539,38 @@ Widget _thumbFill(PaneController pane, FsEntry e, Size box, FileStyle st) {
     return _RemoteImg(pane: pane, e: e, w: box.width, h: box.height, st: st, radius: 10);
   }
   return Icon(st.icon, color: st.color, size: 46);
+}
+
+class _StripChip extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool selected;
+  final VoidCallback? onTap;
+  const _StripChip({required this.label, this.icon, this.selected = false, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? t.accent.withValues(alpha: 0.2) : t.surface2,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: selected ? t.accent.withValues(alpha: 0.75) : t.border),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (icon != null) ...[Icon(icon, size: 17, color: selected ? t.accent2 : t.muted), const SizedBox(width: 7)],
+            Text(label, maxLines: 1, softWrap: false, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: selected ? t.text : t.text.withValues(alpha: 0.85))),
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 class _Albums extends StatelessWidget {

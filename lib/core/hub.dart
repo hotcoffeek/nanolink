@@ -20,5 +20,7 @@ abstract class Hub {
   Future<bool> askPair(PairRequest r);
   String? trustedSecret(String id);
   void trust(String id, String secret, {String? name, DeviceKind? kind, String? ip});
+  /// Файл полностью получен от другого устройства.
+  void onReceived(String from, String path);
   void onBeacon(String id, String name, DeviceKind kind, String ip, int port);
 }

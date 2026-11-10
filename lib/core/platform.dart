@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
@@ -43,6 +44,49 @@ class Native {
   }
 
   static Future<bool> openFile(String path, String mime) async => (await _call<bool>('openFile', {'path': path, 'mime': mime})) ?? false;
+
+  static void listenShared(Future<void> Function() cb) {
+    if (!Platform.isAndroid) return;
+    _ch.setMethodCallHandler((call) async {
+      if (call.method == 'sharedReady') await cb();
+      return null;
+    });
+  }
+
+  static Future<List<String>> takeShared() async {
+    final r = await _call<List<dynamic>>('takeShared');
+    return r == null ? <String>[] : r.map((e) => e.toString()).toList();
+  }
+
+  static Future<bool> hasMedia() async => (await _call<bool>('hasMedia')) ?? true;
+
+  /// Системный запрос доступа к фото и видео. true - доступ получен.
+  static Future<bool> ensureMedia() async {
+    if (!Platform.isAndroid) return true;
+    if (await hasMedia()) return true;
+    await _call<bool>('requestMedia');
+    for (var i = 0; i < 240; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (await hasMedia()) return true;
+    }
+    return false;
+  }
+
+  static Future<void> openAppSettings() async {
+    await _call<bool>('openAppSettings');
+  }
+
+  static Future<List<Map<String, dynamic>>?> queryMedia(String kind) async {
+    final r = await _call<List<dynamic>>('queryMedia', {'kind': kind});
+    if (r == null) return null;
+    return r.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  static final Map<String, Future<Uint8List?>> _thumbs = {};
+
+  static Future<Uint8List?> thumb(String path, {int size = 256}) {
+    return _thumbs.putIfAbsent('$path|$size', () => _call<Uint8List>('thumb', {'path': path, 'size': size}));
+  }
 
   static Future<String> deviceModel() async => (await _call<String>('deviceModel')) ?? 'Android';
   static Future<bool> isTv() async => (await _call<bool>('isTv')) ?? false;

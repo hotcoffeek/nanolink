@@ -45,6 +45,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _s?.checkAllFiles();
+      _s?.pullShared();
     }
   }
 

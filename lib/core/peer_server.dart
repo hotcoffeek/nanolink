@@ -153,7 +153,9 @@ class PeerServer {
             break;
           case 'rename':
             _needWrite();
-            await _lv.rename(wireToLocal(p), wireToLocal((m['to'] ?? '').toString()));
+            final toLocal = wireToLocal((m['to'] ?? '').toString());
+            await _lv.rename(wireToLocal(p), toLocal);
+            if (p.endsWith('.nlpart') && !toLocal.endsWith('.nlpart')) hub.onReceived(peer.name, toLocal);
             fs.sendJson({'ok': true});
             break;
           case 'delete':

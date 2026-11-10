@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../ui/theme.dart';
+import 'category.dart' show entryOfPath;
 import 'discovery.dart';
 import 'ftp_vfs.dart';
 import 'hub.dart';
@@ -156,6 +157,7 @@ class AppState extends ChangeNotifier implements Hub {
 
     if (Platform.isAndroid) {
       _lastBind = settings.bindWifi;
+      Native.listenShared(pullShared);
       unawaited(Native.startKeepAlive(bindWifi: settings.bindWifi));
       unawaited(applyBind());
       unawaited(Native.requestNotifications());
@@ -547,6 +549,39 @@ class AppState extends ChangeNotifier implements Hub {
     if (want == _lastBind) return;
     _lastBind = want;
     await Native.startKeepAlive(bindWifi: want);
+  }
+
+  // --- Принятые файлы и «Поделиться» ---------------------------------
+
+  int receivedTick = 0;
+  String? lastFrom;
+  String? lastFile;
+  final List<FsEntry> pendingShare = [];
+  int shareTick = 0;
+
+  @override
+  void onReceived(String from, String path) {
+    lastFrom = from;
+    lastFile = path;
+    receivedTick++;
+    notifyListeners();
+  }
+
+  Future<void> pullShared() async {
+    if (!Platform.isAndroid) return;
+    final paths = await Native.takeShared();
+    var any = false;
+    for (final p in paths) {
+      final e = entryOfPath(p);
+      if (e != null) {
+        pendingShare.add(e);
+        any = true;
+      }
+    }
+    if (any) {
+      shareTick++;
+      notifyListeners();
+    }
   }
 
   PairRequest? get pendingPair => _pairQ.isEmpty ? null : _pairQ.first.req;

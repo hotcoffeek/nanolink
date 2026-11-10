@@ -1,11 +1,16 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../core/category.dart';
 import '../core/i18n.dart';
 import '../core/local_vfs.dart';
 import '../core/models.dart';
 import '../core/pane.dart';
+import '../core/platform.dart';
 import '../core/state.dart';
 import '../core/util.dart';
 import 'dialogs.dart';
@@ -17,7 +22,7 @@ import 'transfers_page.dart';
 import 'widgets.dart';
 
 /// Главный экран на телефоне: минимализм в духе LocalSend.
-/// Отправить / Передачи / Настройки. Файлы чужих устройств открываются отдельным экраном.
+/// Получить / Отправить / Передачи / Настройки. Файлы чужих устройств открываются отдельным экраном.
 class PhoneHome extends StatefulWidget {
   const PhoneHome({super.key});
 
@@ -26,7 +31,56 @@ class PhoneHome extends StatefulWidget {
 }
 
 class _PhoneHomeState extends State<PhoneHome> {
-  int _tab = 0;
+  int _tab = 1;
+  AppState? _s;
+  int _recvSeen = 0;
+  final GlobalKey<SendPageState> _sendKey = GlobalKey<SendPageState>();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_s == null) {
+      _s = AppScope.of(context);
+      _recvSeen = _s!.receivedTick;
+      _s!.addListener(_onState);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _s!.pullShared();
+        _onState();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _s?.removeListener(_onState);
+    super.dispose();
+  }
+
+  void _onState() {
+    final s = _s;
+    if (s == null || !mounted) return;
+    if (s.pendingShare.isNotEmpty) {
+      final items = List<FsEntry>.from(s.pendingShare);
+      s.pendingShare.clear();
+      setState(() => _tab = 1);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _sendKey.currentState?.addEntries(items);
+        if (mounted) toast(context, tr('Выберите устройство для отправки', 'Pick a device to send to'));
+      });
+    }
+    if (s.receivedTick != _recvSeen) {
+      _recvSeen = s.receivedTick;
+      final f = s.lastFile;
+      if (f != null && _tab != 0) {
+        final name = f.substring(f.lastIndexOf('/') + 1);
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('Получено от ${s.lastFrom ?? ''}: $name', 'Received from ${s.lastFrom ?? ''}: $name')),
+          action: SnackBarAction(label: tr('Открыть', 'Open'), onPressed: () => openReceived(context, f)),
+        ));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +89,8 @@ class _PhoneHomeState extends State<PhoneHome> {
     return Column(children: [
       Expanded(
         child: IndexedStack(index: _tab, children: [
-          SendPage(onSent: () => setState(() => _tab = 1)),
+          const ReceivePage(),
+          SendPage(key: _sendKey, onSent: () => setState(() => _tab = 2)),
           const TransfersPage(),
           const SettingsPage(),
         ]),
@@ -44,6 +99,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         listenable: Listenable.merge([s, s.transfers]),
         builder: (context, _) {
           final items = [
+            (Icons.wifi_tethering_rounded, tr('Получить', 'Receive'), 0),
             (Icons.send_rounded, tr('Отправить', 'Send'), 0),
             (Icons.swap_vert_rounded, tr('Передачи', 'Transfers'), s.transfers.activeCount),
             (Icons.settings_rounded, tr('Настройки', 'Settings'), 0),
@@ -73,7 +129,7 @@ class _PhoneHomeState extends State<PhoneHome> {
                           child: Icon(items[i].$1, size: 22, color: _tab == i ? Colors.white : t.muted),
                         ),
                         const SizedBox(height: 3),
-                        Text(items[i].$2, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _tab == i ? Colors.white : t.muted)),
+                        Text(items[i].$2, maxLines: 1, softWrap: false, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _tab == i ? Colors.white : t.muted)),
                       ]),
                     ),
                   ),
@@ -86,6 +142,206 @@ class _PhoneHomeState extends State<PhoneHome> {
   }
 }
 
+Future<void> openReceived(BuildContext context, String path) async {
+  final dot = path.lastIndexOf('.');
+  final ext = dot < 0 ? '' : path.substring(dot + 1);
+  final ok = await Native.openFile(path, PaneController.mimeOf(ext));
+  if (!ok && context.mounted) toast(context, tr('Нет приложения для этого файла', 'No app can open this file'));
+}
+
+/// Вкладка «Получить»: большая пульсирующая иконка устройства и список принятых файлов.
+class ReceivePage extends StatefulWidget {
+  const ReceivePage({super.key});
+
+  @override
+  State<ReceivePage> createState() => _ReceivePageState();
+}
+
+class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStateMixin {
+  late final AnimationController _anim = AnimationController(vsync: this, duration: const Duration(seconds: 3))..repeat();
+  List<FsEntry> _files = const [];
+  String _dir = '';
+  AppState? _s;
+  int _seen = -1;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_s == null) {
+      _s = AppScope.of(context);
+      _s!.addListener(_check);
+      _reload();
+    }
+  }
+
+  void _check() {
+    final s = _s;
+    if (s != null && s.receivedTick != _seen) _reload();
+  }
+
+  Future<void> _reload() async {
+    final s = _s;
+    if (s == null) return;
+    _seen = s.receivedTick;
+    try {
+      final dir = await s.localInbox();
+      final l = await LocalVfs().list(dir);
+      final files = l.where((e) => !e.isDir && !e.name.endsWith('.nlpart')).toList()
+        ..sort((a, b) => (b.modified?.millisecondsSinceEpoch ?? 0).compareTo(a.modified?.millisecondsSinceEpoch ?? 0));
+      if (!mounted) return;
+      setState(() {
+        _dir = dir;
+        _files = files.take(40).toList();
+      });
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _s?.removeListener(_check);
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context);
+    final t = NlScope.of(context);
+    final on = s.settings.serverOn && s.netOnline;
+    return ListenableBuilder(
+      listenable: s,
+      builder: (context, _) {
+        final ip = s.nics.isEmpty ? null : s.nics.first.ip;
+        return RefreshIndicator(
+          onRefresh: _reload,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            children: [
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 230,
+                child: AnimatedBuilder(
+                  animation: _anim,
+                  builder: (_, __) => CustomPaint(
+                    painter: _PulsePainter(_anim.value, on ? t.accent2 : t.muted, on),
+                    child: Center(child: Icon(Icons.wifi_tethering_rounded, size: 54, color: on ? Colors.white : t.muted)),
+                  ),
+                ),
+              ),
+              Center(child: Text(s.myName, textAlign: TextAlign.center, style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w300))),
+              const SizedBox(height: 6),
+              Center(
+                child: Text(
+                  !s.netOnline
+                      ? tr('Нет Wi-Fi', 'No Wi-Fi')
+                      : (s.settings.serverOn ? '${ip ?? ''}  ·  ${tr('видно другим', 'visible to others')}' : tr('Приём выключен', 'Receiving is off')),
+                  style: TextStyle(color: on ? const Color(0xFF3DDC84) : t.muted, fontWeight: FontWeight.w600),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Center(child: Switch(value: s.settings.serverOn, onChanged: s.setServerOn)),
+              const SizedBox(height: 18),
+              Row(children: [
+                Text(tr('ПОЛУЧЕНО', 'RECEIVED'), style: TextStyle(color: t.muted, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 0.9)),
+                const Spacer(),
+                IconBtn(icon: Icons.refresh_rounded, tip: tr('Обновить', 'Refresh'), onTap: _reload),
+              ]),
+              if (_dir.isNotEmpty) Text(_dir, style: TextStyle(color: t.muted, fontSize: 11.5)),
+              const SizedBox(height: 8),
+              if (_files.isEmpty)
+                GlassCard(
+                  padding: const EdgeInsets.all(22),
+                  child: Text(
+                    tr('Пока ничего не получено. Когда вам отправят файлы, они появятся здесь.', 'Nothing received yet. Files sent to you will show up here.'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: t.muted),
+                  ),
+                )
+              else
+                for (final e in _files)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _RecvTile(
+                      e: e,
+                      onOpen: () => openReceived(context, e.path),
+                      onDelete: () async {
+                        final ok = await confirmDialog(context, tr('Удалить файл?', 'Delete file?'), e.name, okLabel: tr('Удалить', 'Delete'));
+                        if (!ok) return;
+                        try {
+                          await File(e.path).delete();
+                        } catch (_) {}
+                        _reload();
+                      },
+                    ),
+                  ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _RecvTile extends StatelessWidget {
+  final FsEntry e;
+  final VoidCallback onOpen;
+  final VoidCallback onDelete;
+  const _RecvTile({required this.e, required this.onOpen, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    final st = fileStyle(e);
+    return GlassCard(
+      onTap: onOpen,
+      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+      child: Row(children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(color: st.color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
+          child: Icon(st.icon, color: st.color),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+            Text('${fmtSize(e.size)} · ${fmtDate(e.modified)}', style: TextStyle(color: t.muted, fontSize: 12)),
+          ]),
+        ),
+        IconBtn(icon: Icons.delete_outline_rounded, tip: tr('Удалить', 'Delete'), onTap: onDelete),
+      ]),
+    );
+  }
+}
+
+class _PulsePainter extends CustomPainter {
+  final double v;
+  final Color color;
+  final bool on;
+  _PulsePainter(this.v, this.color, this.on);
+
+  @override
+  void paint(Canvas c, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final base = 54.0;
+    if (on) {
+      for (var i = 0; i < 3; i++) {
+        final k = (v + i / 3) % 1.0;
+        final r = base + k * 80;
+        c.drawCircle(center, r, Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2
+          ..color = color.withValues(alpha: (1 - k) * 0.55));
+      }
+    }
+    c.drawCircle(center, base, Paint()..color = on ? color.withValues(alpha: 0.9) : color.withValues(alpha: 0.25));
+  }
+
+  @override
+  bool shouldRepaint(covariant _PulsePainter o) => o.v != v || o.on != on || o.color != color;
+}
+
 enum PickKind { files, photos, videos, folder }
 
 class SendPage extends StatefulWidget {
@@ -93,16 +349,64 @@ class SendPage extends StatefulWidget {
   const SendPage({super.key, required this.onSent});
 
   @override
-  State<SendPage> createState() => _SendPageState();
+  State<SendPage> createState() => SendPageState();
 }
 
-class _SendPageState extends State<SendPage> {
+class SendPageState extends State<SendPage> {
   final List<FsEntry> _sel = [];
+
+  void addEntries(List<FsEntry> r) {
+    setState(() {
+      for (final e in r) {
+        if (!_sel.any((x) => x.path == e.path)) _sel.add(e);
+      }
+    });
+  }
+
+  Future<void> _addText(String text) async {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    final dir = Directory('${(await getTemporaryDirectory()).path}/nl_text');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final n = DateTime.now();
+    String two(int x) => x.toString().padLeft(2, '0');
+    final f = File('${dir.path}/text_${two(n.hour)}${two(n.minute)}${two(n.second)}.txt');
+    await f.writeAsString(t);
+    final e = entryOfPath(f.path);
+    if (e != null && mounted) addEntries([e]);
+  }
+
+  Future<void> _textDialog() async {
+    final c = TextEditingController();
+    final r = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: Text(tr('Текст', 'Text')),
+        content: SizedBox(width: 360, child: TextField(controller: c, autofocus: true, minLines: 3, maxLines: 8, decoration: InputDecoration(hintText: tr('Введите текст для отправки', 'Type the text to send')))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx), child: Text(tr('Отмена', 'Cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(dctx, c.text), child: Text(tr('Добавить', 'Add'))),
+        ],
+      ),
+    );
+    if (r != null) await _addText(r);
+  }
+
+  Future<void> _paste() async {
+    final d = await Clipboard.getData('text/plain');
+    final t = d?.text ?? '';
+    if (t.trim().isEmpty) {
+      if (mounted) toast(context, tr('Буфер обмена пуст', 'Clipboard is empty'));
+      return;
+    }
+    await _addText(t);
+  }
 
   int get _bytes => _sel.fold<int>(0, (a, e) => a + (e.isDir ? 0 : e.size));
 
   Future<void> _pick(PickKind k) async {
-    final r = await Navigator.of(context).push<List<FsEntry>>(MaterialPageRoute(builder: (_) => PickerPage(kind: k)));
+    final media = Platform.isAndroid && (k == PickKind.photos || k == PickKind.videos);
+    final r = await Navigator.of(context).push<List<FsEntry>>(MaterialPageRoute(builder: (_) => media ? MediaPickerPage(video: k == PickKind.videos) : PickerPage(kind: k)));
     if (r == null || r.isEmpty || !mounted) return;
     setState(() {
       for (final e in r) {
@@ -293,6 +597,10 @@ class _SendPageState extends State<SendPage> {
               ]),
             ),
             const SizedBox(height: 14),
+            if (!s.allFilesOk) ...[
+              _PermCard(s: s),
+              const SizedBox(height: 14),
+            ],
             // Что отправить
             Row(children: [
               _PickTile(icon: Icons.insert_drive_file_rounded, label: tr('Файлы', 'Files'), onTap: () => _pick(PickKind.files)),
@@ -302,6 +610,16 @@ class _SendPageState extends State<SendPage> {
               _PickTile(icon: Icons.video_library_rounded, label: tr('Видео', 'Videos'), onTap: () => _pick(PickKind.videos)),
               const SizedBox(width: 8),
               _PickTile(icon: Icons.folder_rounded, label: tr('Папка', 'Folder'), onTap: () => _pick(PickKind.folder)),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              _PickTile(icon: Icons.notes_rounded, label: tr('Текст', 'Text'), onTap: _textDialog),
+              const SizedBox(width: 8),
+              _PickTile(icon: Icons.content_paste_rounded, label: tr('Вставить', 'Paste'), onTap: _paste),
+              const SizedBox(width: 8),
+              const Expanded(child: SizedBox()),
+              const SizedBox(width: 8),
+              const Expanded(child: SizedBox()),
             ]),
             AnimatedSize(
               duration: const Duration(milliseconds: 220),
@@ -490,6 +808,7 @@ class _PickerPageState extends State<PickerPage> {
   @override
   void initState() {
     super.initState();
+    pane.pickMode = true;
     pane.grid = widget.kind == PickKind.photos || widget.kind == PickKind.videos;
     pane.attach(LocalVfs(), () => LocalVfs(), null).then((_) {
       if (!mounted) return;
@@ -528,9 +847,24 @@ class _PickerPageState extends State<PickerPage> {
         ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-          child: PaneView(pane: pane, hideHeader: true, hideSelBar: true),
+        child: ListenableBuilder(
+          listenable: AppScope.of(context),
+          builder: (context, _) {
+            final s = AppScope.of(context);
+            if (Platform.isAndroid && !s.allFilesOk) {
+              return _Gate(
+                icon: Icons.folder_open_rounded,
+                text: tr('Чтобы выбирать файлы и папки, разрешите NanoLink доступ к файлам. Откроется системный экран - включите переключатель и вернитесь назад.',
+                    'To pick files and folders allow NanoLink to access files. A system screen opens - switch it on and come back.'),
+                button: tr('Разрешить доступ к файлам', 'Allow file access'),
+                onTap: () => Native.requestAllFiles(),
+              );
+            }
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: PaneView(pane: pane, hideHeader: true, hideSelBar: true, hideCats: true),
+            );
+          },
         ),
       ),
       bottomNavigationBar: ListenableBuilder(
@@ -705,6 +1039,282 @@ class _BrowsePageState extends State<BrowsePage> {
           );
         },
       ),
+    );
+  }
+}
+
+class _Gate extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final String button;
+  final VoidCallback onTap;
+  final String? second;
+  final VoidCallback? onSecond;
+  const _Gate({required this.icon, required this.text, required this.button, required this.onTap, this.second, this.onSecond});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 54, color: t.accent2),
+          const SizedBox(height: 16),
+          Text(text, textAlign: TextAlign.center, style: TextStyle(color: t.muted, fontSize: 14.5, height: 1.35)),
+          const SizedBox(height: 20),
+          GradientButton(label: button, icon: Icons.lock_open_rounded, onTap: onTap),
+          if (second != null) ...[
+            const SizedBox(height: 10),
+            TextButton(onPressed: onSecond, child: Text(second!)),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+class _PermCard extends StatelessWidget {
+  final AppState s;
+  const _PermCard({required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      borderColor: const Color(0xFFFFB020).withValues(alpha: 0.6),
+      child: Row(children: [
+        const Icon(Icons.shield_outlined, color: Color(0xFFFFB020)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(tr('Нужен доступ к файлам', 'File access needed'), style: const TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 2),
+            Text(tr('Чтобы принимать и отправлять файлы', 'To receive and send files'), style: TextStyle(color: t.muted, fontSize: 12)),
+          ]),
+        ),
+        GradientButton(compact: true, label: tr('Разрешить', 'Allow'), onTap: () => Native.requestAllFiles()),
+      ]),
+    );
+  }
+}
+
+class _MItem {
+  final String path;
+  final int size;
+  final DateTime modified;
+  final String bucket;
+  _MItem(this.path, this.size, this.modified, this.bucket);
+  String get name => path.substring(path.lastIndexOf('/') + 1);
+}
+
+/// Галерея фото/видео телефона: быстрый запрос к MediaStore, выбор тапом, без галочек.
+class MediaPickerPage extends StatefulWidget {
+  final bool video;
+  const MediaPickerPage({super.key, required this.video});
+
+  @override
+  State<MediaPickerPage> createState() => _MediaPickerPageState();
+}
+
+class _MediaPickerPageState extends State<MediaPickerPage> {
+  bool _loading = true;
+  bool _denied = false;
+  List<_MItem> _all = const [];
+  final Map<String, int> _buckets = {};
+  String? _bucket; // null = все
+  final Set<String> _sel = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _denied = false;
+    });
+    final ok = await Native.ensureMedia();
+    if (!mounted) return;
+    if (!ok) {
+      setState(() {
+        _loading = false;
+        _denied = true;
+      });
+      return;
+    }
+    final raw = await Native.queryMedia(widget.video ? 'video' : 'images');
+    if (!mounted) return;
+    final items = <_MItem>[];
+    _buckets.clear();
+    for (final m in raw ?? const <Map<String, dynamic>>[]) {
+      final p = (m['p'] ?? '').toString();
+      if (p.isEmpty) continue;
+      final b = (m['b'] ?? '').toString();
+      items.add(_MItem(p, (m['s'] as num?)?.toInt() ?? 0, DateTime.fromMillisecondsSinceEpoch((m['m'] as num?)?.toInt() ?? 0), b));
+      _buckets[b] = (_buckets[b] ?? 0) + 1;
+    }
+    setState(() {
+      _all = items;
+      _loading = false;
+    });
+  }
+
+  List<_MItem> get _view => _bucket == null ? _all : _all.where((e) => e.bucket == _bucket).toList();
+
+  void _done() {
+    final res = <FsEntry>[];
+    for (final e in _all) {
+      if (_sel.contains(e.path)) res.add(FsEntry(name: e.name, path: e.path, isDir: false, size: e.size, modified: e.modified));
+    }
+    Navigator.pop(context, res);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    final view = _view;
+    final names = _buckets.keys.toList()..sort((a, b) => _buckets[b]!.compareTo(_buckets[a]!));
+    return Scaffold(
+      backgroundColor: t.bg,
+      appBar: AppBar(
+        backgroundColor: t.bg,
+        elevation: 0,
+        title: Text(widget.video ? tr('Видео', 'Videos') : tr('Фото', 'Photos'), style: const TextStyle(fontWeight: FontWeight.w800)),
+        actions: [
+          if (!_loading && view.isNotEmpty)
+            TextButton(
+              onPressed: () => setState(() {
+                final all = view.every((e) => _sel.contains(e.path));
+                for (final e in view) {
+                  all ? _sel.remove(e.path) : _sel.add(e.path);
+                }
+              }),
+              child: Text(tr('Выбрать все', 'Select all')),
+            ),
+        ],
+      ),
+      body: SafeArea(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _denied
+                ? _Gate(
+                    icon: widget.video ? Icons.video_library_rounded : Icons.photo_library_rounded,
+                    text: tr('Чтобы показать галерею, разрешите NanoLink доступ к фото и видео.', 'To show the gallery allow NanoLink to access photos and videos.'),
+                    button: tr('Разрешить', 'Allow'),
+                    onTap: _load,
+                    second: tr('Открыть настройки приложения', 'Open app settings'),
+                    onSecond: Native.openAppSettings,
+                  )
+                : Column(children: [
+                    SizedBox(
+                      height: 50,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        children: [
+                          _Bucket(label: tr('Все', 'All'), count: _all.length, selected: _bucket == null, onTap: () => setState(() => _bucket = null)),
+                          for (final n in names)
+                            _Bucket(label: n.isEmpty ? '-' : n, count: _buckets[n]!, selected: _bucket == n, onTap: () => setState(() => _bucket = n)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: view.isEmpty
+                          ? Center(child: Text(widget.video ? tr('Видео не найдено', 'No videos found') : tr('Фото не найдены', 'No photos found'), style: TextStyle(color: t.muted)))
+                          : GridView.builder(
+                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 130, mainAxisSpacing: 4, crossAxisSpacing: 4),
+                              itemCount: view.length,
+                              itemBuilder: (_, i) {
+                                final e = view[i];
+                                final on = _sel.contains(e.path);
+                                return GestureDetector(
+                                  onTap: () => setState(() => on ? _sel.remove(e.path) : _sel.add(e.path)),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Stack(fit: StackFit.expand, children: [
+                                      _Thumb(path: e.path, video: widget.video),
+                                      if (on) Container(color: t.accent.withValues(alpha: 0.35)),
+                                      if (on) Positioned(right: 6, top: 6, child: Icon(Icons.check_circle_rounded, color: Colors.white, size: 24, shadows: [Shadow(color: t.accent, blurRadius: 8)])),
+                                      if (widget.video) const Positioned(left: 6, bottom: 6, child: Icon(Icons.play_circle_fill_rounded, color: Colors.white70, size: 22)),
+                                      if (on) DecoratedBox(decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: t.accent2, width: 3))),
+                                    ]),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ]),
+      ),
+      bottomNavigationBar: _sel.isEmpty
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: GradientButton(label: tr('Готово · ${_sel.length}', 'Done · ${_sel.length}'), icon: Icons.check_rounded, onTap: _done),
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+class _Bucket extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+  const _Bucket({required this.label, required this.count, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Ink(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: selected ? t.accent.withValues(alpha: 0.22) : t.surface2,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: selected ? t.accent.withValues(alpha: 0.8) : t.border),
+            ),
+            child: Text('$label · $count', maxLines: 1, softWrap: false, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: selected ? t.text : t.muted)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Thumb extends StatelessWidget {
+  final String path;
+  final bool video;
+  const _Thumb({required this.path, required this.video});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    if (!video) {
+      return Image.file(File(path), fit: BoxFit.cover, cacheWidth: 300, gaplessPlayback: true, errorBuilder: (_, __, ___) => Container(color: t.surface2));
+    }
+    return FutureBuilder<Uint8List?>(
+      future: Native.thumb(path, size: 256),
+      builder: (_, snap) {
+        final b = snap.data;
+        if (b == null) return Container(color: t.surface2, child: Icon(Icons.movie_rounded, color: t.muted));
+        return Image.memory(b, fit: BoxFit.cover, gaplessPlayback: true);
+      },
     );
   }
 }

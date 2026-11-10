@@ -37,6 +37,7 @@ class PaneController extends ChangeNotifier {
   bool loading = false;
   String? error;
   bool grid = false;
+  bool pickMode = false; // в режиме выбора тап по файлу выделяет его
   String sort = 'name';
   bool asc = true;
   List<Place> places = const [];
