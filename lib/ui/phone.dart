@@ -34,6 +34,7 @@ class _PhoneHomeState extends State<PhoneHome> {
   int _tab = 1;
   AppState? _s;
   int _recvSeen = 0;
+  bool _recvOpen = false;
   final GlobalKey<SendPageState> _sendKey = GlobalKey<SendPageState>();
 
   @override
@@ -59,6 +60,13 @@ class _PhoneHomeState extends State<PhoneHome> {
   void _onState() {
     final s = _s;
     if (s == null || !mounted) return;
+    if (s.pendingRecv != null && !_recvOpen) {
+      _recvOpen = true;
+      showRecvDialog(context, s).whenComplete(() {
+        _recvOpen = false;
+        if (mounted) _onState();
+      });
+    }
     if (s.pendingShare.isNotEmpty) {
       final items = List<FsEntry>.from(s.pendingShare);
       s.pendingShare.clear();
@@ -99,7 +107,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         listenable: Listenable.merge([s, s.transfers]),
         builder: (context, _) {
           final items = [
-            (Icons.wifi_tethering_rounded, tr('Получить', 'Receive'), 0),
+            (Icons.wifi_tethering_rounded, tr('Получить', 'Receive'), s.incoming.length),
             (Icons.send_rounded, tr('Отправить', 'Send'), 0),
             (Icons.swap_vert_rounded, tr('Передачи', 'Transfers'), s.transfers.activeCount),
             (Icons.settings_rounded, tr('Настройки', 'Settings'), 0),
@@ -241,6 +249,29 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
               const SizedBox(height: 8),
               Center(child: Switch(value: s.settings.serverOn, onChanged: s.setServerOn)),
               const SizedBox(height: 18),
+              if (s.incoming.isNotEmpty) ...[
+                Text(tr('ПОЛУЧАЮ', 'RECEIVING'), style: TextStyle(color: t.muted, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 0.9)),
+                const SizedBox(height: 8),
+                for (final i in s.incoming.values)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: GlassCard(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                      borderColor: t.accent.withValues(alpha: 0.5),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Expanded(child: Text(i.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800))),
+                          Text(i.total > 0 ? '${(i.done * 100 ~/ i.total).clamp(0, 100)}%' : '', style: TextStyle(color: t.accent2, fontWeight: FontWeight.w800)),
+                        ]),
+                        const SizedBox(height: 2),
+                        Text('${tr('от', 'from')} ${i.from} · ${fmtSize(i.done)} / ${fmtSize(i.total)}', style: TextStyle(color: t.muted, fontSize: 12)),
+                        const SizedBox(height: 8),
+                        ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: i.total > 0 ? i.done / i.total : null, minHeight: 5)),
+                      ]),
+                    ),
+                  ),
+                const SizedBox(height: 10),
+              ],
               Row(children: [
                 Text(tr('ПОЛУЧЕНО', 'RECEIVED'), style: TextStyle(color: t.muted, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 0.9)),
                 const Spacer(),

@@ -317,3 +317,40 @@ Future<void> connectFlow(BuildContext ctx, AppState s, PaneController pane, Devi
   }
   await s.connect(pane, d, proto);
 }
+
+/// «Устройство хочет отправить вам файл» - принять или отклонить.
+Future<void> showRecvDialog(BuildContext ctx, AppState s) async {
+  final req = s.pendingRecv;
+  if (req == null) return;
+  await showDialog<void>(
+    context: ctx,
+    barrierDismissible: false,
+    builder: (dctx) => AlertDialog(
+      title: Text(tr('Входящий файл', 'Incoming file')),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(req.from, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Text(req.file),
+        const SizedBox(height: 10),
+        Text(tr('Если принять, остальные файлы от этого устройства в течение 2 минут принимаются без вопросов.', 'If you accept, the other files from this device in the next 2 minutes are accepted without asking.'),
+            style: TextStyle(color: NlScope.of(dctx).muted, fontSize: 12.5)),
+      ]),
+      actions: [
+        TextButton(
+          onPressed: () {
+            s.answerRecv(false);
+            Navigator.pop(dctx);
+          },
+          child: Text(tr('Отклонить', 'Decline')),
+        ),
+        FilledButton(
+          onPressed: () {
+            s.answerRecv(true);
+            Navigator.pop(dctx);
+          },
+          child: Text(tr('Принять', 'Accept')),
+        ),
+      ],
+    ),
+  );
+}

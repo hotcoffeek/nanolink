@@ -45,6 +45,7 @@ class Settings {
   bool bindWifi = true;
   bool serverOn = true;
   bool autoPair = true;
+  bool askReceive = false;
 
   Map<String, dynamic> toJson() => {
         'theme': theme,
@@ -55,6 +56,7 @@ class Settings {
         'bindWifi': bindWifi,
         'serverOn': serverOn,
         'autoPair': autoPair,
+        'askReceive': askReceive,
       };
 
   void apply(Map<String, dynamic> j) {
@@ -66,5 +68,6 @@ class Settings {
     bindWifi = (j['bindWifi'] ?? bindWifi) as bool;
     serverOn = (j['serverOn'] ?? serverOn) as bool;
     autoPair = (j['autoPair'] ?? autoPair) as bool;
+    askReceive = (j['askReceive'] ?? askReceive) as bool;
   }
 }

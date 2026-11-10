@@ -22,6 +22,7 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> with WidgetsBindingObserver {
   AppState? _s;
   bool _pairOpen = false;
+  bool _recvOpen = false;
 
   @override
   void didChangeDependencies() {
@@ -43,6 +44,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _s?.foreground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _s?.checkAllFiles();
       _s?.pullShared();
@@ -52,6 +54,13 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   void _onState() {
     final s = _s;
     if (s == null || !mounted) return;
+    if (s.pendingRecv != null && !_recvOpen) {
+      _recvOpen = true;
+      showRecvDialog(context, s).whenComplete(() {
+        _recvOpen = false;
+        if (mounted) _onState();
+      });
+    }
     if (s.pendingPair != null && !_pairOpen) {
       _pairOpen = true;
       showPairDialog(context, s).whenComplete(() {

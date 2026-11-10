@@ -190,6 +190,23 @@ class MainActivity : FlutterActivity() {
                         val ui = getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
                         result.success(ui.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION)
                     }
+                    "notify" -> {
+                        val title = call.argument<String>("title") ?: "NanoLink"
+                        val text = call.argument<String>("text") ?: ""
+                        val id = call.argument<Int>("id") ?: 1
+                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                        if (Build.VERSION.SDK_INT >= 26) {
+                            nm.createNotificationChannel(android.app.NotificationChannel("nl_recv", "NanoLink", android.app.NotificationManager.IMPORTANCE_HIGH))
+                        }
+                        val pi = android.app.PendingIntent.getActivity(
+                            this, 0,
+                            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+                            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+                        val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, "nl_recv") else android.app.Notification.Builder(this)
+                        b.setContentTitle(title).setContentText(text).setSmallIcon(applicationInfo.icon).setContentIntent(pi).setAutoCancel(true)
+                        nm.notify(id, b.build())
+                        result.success(true)
+                    }
                     "takeShared" -> {
                         val l = ArrayList(pending)
                         pending.clear()

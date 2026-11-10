@@ -167,7 +167,7 @@ class PeerServer {
             await _get(fs, wireToLocal(p), (m['off'] as num?)?.toInt() ?? 0);
             return true;
           case 'put':
-            await _put(fs, wireToLocal(p), (m['len'] as num).toInt(), m['append'] == true);
+            await _put(fs, wireToLocal(p), (m['len'] as num).toInt(), m['append'] == true, peer);
             return true;
           default:
             fs.sendJson({'ok': false, 'err': 'неизвестная команда'});
@@ -201,8 +201,11 @@ class PeerServer {
     await fs.socket.flush();
   }
 
-  Future<void> _put(FrameSocket fs, String local, int len, bool append) async {
+  Future<void> _put(FrameSocket fs, String local, int len, bool append, _PeerInfo peer) async {
     _needWrite();
+    var shown = local.substring(local.lastIndexOf('/') + 1);
+    if (shown.endsWith('.nlpart')) shown = shown.substring(0, shown.length - 7);
+    if (!await hub.askReceive(peer.name, peer.id, shown)) throw FsError('Получатель отклонил передачу');
     final f = File(local);
     await f.parent.create(recursive: true);
     final raf = await f.open(mode: append ? FileMode.append : FileMode.write);
@@ -213,10 +216,12 @@ class PeerServer {
         final b = await fs.readSome(min(remaining, 1 << 20), idle: const Duration(seconds: 20));
         await raf.writeFrom(b);
         remaining -= b.length;
+        hub.onIncoming(peer.name, shown, len - remaining, len, false);
       }
       await raf.flush();
     } finally {
       await raf.close();
+      hub.onIncoming(peer.name, shown, 0, 0, true);
     }
     fs.sendJson({'ok': true, 'size': await f.length()});
   }

@@ -29,6 +29,27 @@ class _PairWait {
   _PairWait(this.req);
 }
 
+class RecvRequest {
+  final String id;
+  final String from;
+  final String file;
+  RecvRequest(this.id, this.from, this.file);
+}
+
+class _RecvWait {
+  final RecvRequest req;
+  final Completer<bool> done = Completer<bool>();
+  _RecvWait(this.req);
+}
+
+class Incoming {
+  final String from;
+  final String name;
+  int done;
+  int total;
+  Incoming(this.from, this.name, this.done, this.total);
+}
+
 const List<String> kProtoPriority = ['nano', 'smb', 'sftp', 'ftp'];
 
 String protoLabel(String p) {
@@ -559,11 +580,79 @@ class AppState extends ChangeNotifier implements Hub {
   final List<FsEntry> pendingShare = [];
   int shareTick = 0;
 
+  bool foreground = true;
+  final Map<String, Incoming> incoming = {};
+  DateTime _incAt = DateTime.fromMillisecondsSinceEpoch(0);
+  final List<_RecvWait> _recvQ = [];
+  final Map<String, DateTime> _recvOk = {};
+
+  RecvRequest? get pendingRecv => _recvQ.isEmpty ? null : _recvQ.first.req;
+
   @override
   void onReceived(String from, String path) {
     lastFrom = from;
     lastFile = path;
     receivedTick++;
+    if (!foreground) {
+      Native.notify(tr('Получено от $from', 'Received from $from'), path.substring(path.lastIndexOf('/') + 1), id: 1);
+    }
+    notifyListeners();
+  }
+
+  @override
+  void onIncoming(String from, String file, int done, int total, bool finished) {
+    final key = '$from|$file';
+    if (finished) {
+      if (incoming.remove(key) != null) notifyListeners();
+      return;
+    }
+    var fresh = false;
+    final i = incoming.putIfAbsent(key, () {
+      fresh = true;
+      return Incoming(from, file, 0, total);
+    });
+    i.done = done;
+    i.total = total;
+    final now = DateTime.now();
+    if (fresh || now.difference(_incAt).inMilliseconds > 300) {
+      _incAt = now;
+      notifyListeners();
+    }
+  }
+
+  @override
+  Future<bool> askReceive(String from, String id, String file) {
+    if (!settings.askReceive) return Future<bool>.value(true);
+    final ok = _recvOk[id];
+    if (ok != null && DateTime.now().difference(ok).inSeconds < 120) return Future<bool>.value(true);
+    for (final w in _recvQ) {
+      if (w.req.id == id) return w.done.future;
+    }
+    final w = _RecvWait(RecvRequest(id, from, file));
+    _recvQ.add(w);
+    if (!foreground) Native.notify(tr('$from хочет отправить файл', '$from wants to send a file'), file, id: 2);
+    notifyListeners();
+    Timer(const Duration(seconds: 25), () {
+      if (!w.done.isCompleted) {
+        _recvQ.remove(w);
+        w.done.complete(false);
+        notifyListeners();
+      }
+    });
+    return w.done.future;
+  }
+
+  void answerRecv(bool ok) {
+    if (_recvQ.isEmpty) return;
+    final w = _recvQ.removeAt(0);
+    if (ok) _recvOk[w.req.id] = DateTime.now();
+    if (!w.done.isCompleted) w.done.complete(ok);
+    notifyListeners();
+  }
+
+  void setAskReceive(bool v) {
+    settings.askReceive = v;
+    saveSoon();
     notifyListeners();
   }
 

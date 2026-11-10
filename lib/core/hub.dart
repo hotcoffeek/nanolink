@@ -22,5 +22,11 @@ abstract class Hub {
   void trust(String id, String secret, {String? name, DeviceKind? kind, String? ip});
   /// Файл полностью получен от другого устройства.
   void onReceived(String from, String path);
+
+  /// Спросить человека, принять ли входящий файл (true - принять).
+  Future<bool> askReceive(String from, String id, String file);
+
+  /// Ход входящей передачи.
+  void onIncoming(String from, String file, int done, int total, bool finished);
   void onBeacon(String id, String name, DeviceKind kind, String ip, int port);
 }

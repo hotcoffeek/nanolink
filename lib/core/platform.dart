@@ -53,6 +53,10 @@ class Native {
     });
   }
 
+  static Future<void> notify(String title, String text, {int id = 1}) async {
+    await _call<bool>('notify', {'title': title, 'text': text, 'id': id});
+  }
+
   static Future<List<String>> takeShared() async {
     final r = await _call<List<dynamic>>('takeShared');
     return r == null ? <String>[] : r.map((e) => e.toString()).toList();

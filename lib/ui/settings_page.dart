@@ -92,6 +92,11 @@ class SettingsPage extends StatelessWidget {
                 t: t,
                 child: Column(children: [
                   _Row(
+                    title: tr('Спрашивать о входящих файлах', 'Ask about incoming files'),
+                    subtitle: tr('Перед приёмом файла показывать «Принять / Отклонить»', 'Show Accept / Decline before a file is received'),
+                    trailing: Switch(value: s.settings.askReceive, onChanged: s.setAskReceive),
+                  ),
+                  _Row(
                     title: tr('Не спрашивать разрешение', "Don't ask for permission"),
                     subtitle: tr('Новые устройства получают доступ сразу, без подтверждения. Выключите, если в сети есть чужие.', 'New devices get access instantly. Turn off on untrusted networks.'),
                     trailing: Switch(
