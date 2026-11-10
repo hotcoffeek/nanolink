@@ -461,6 +461,8 @@ class ReceivePage extends StatefulWidget {
 class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStateMixin {
   late final AnimationController _anim = AnimationController(vsync: this, duration: const Duration(seconds: 3))..repeat();
   List<FsEntry> _files = const [];
+  List<FsEntry> _all = const [];
+  final Set<String> _pick = {};
   String _dir = '';
   AppState? _s;
   int _seen = -1;
@@ -492,9 +494,53 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
       if (!mounted) return;
       setState(() {
         _dir = dir;
-        _files = files.take(40).toList();
+        _all = files;
+        _files = files.take(30).toList();
+        _pick.removeWhere((p) => !files.any((e) => e.path == p));
       });
     } catch (_) {}
+  }
+
+  String get _dirName => _dir.isEmpty ? '' : _dir.substring(_dir.lastIndexOf('/') + 1);
+
+  Future<void> _deleteMany(List<String> paths) async {
+    final s = _s;
+    if (s == null) return;
+    for (final p in paths) {
+      try {
+        await File(p).delete();
+      } catch (_) {}
+    }
+    s.forgetPaths(paths.toSet());
+    _pick.clear();
+    await _reload();
+  }
+
+  Future<void> _deleteSelected() async {
+    final n = _pick.length;
+    final ok = await confirmDialog(context, tr('Удалить выбранное?', 'Delete selected?'), tr('Файлов: $n. Это нельзя отменить.', 'Files: $n. This cannot be undone.'), okLabel: tr('Удалить', 'Delete'));
+    if (ok) await _deleteMany(_pick.toList());
+  }
+
+  /// «Очистить»: в папке NanoLink удаляем всё, в чужой папке (например Загрузки) - только то, что принял NanoLink.
+  Future<void> _clearAll() async {
+    final s = _s;
+    if (s == null || _all.isEmpty) return;
+    final known = s.history.map((h) => h.path).toSet();
+    final ownFolder = _dirName.toLowerCase() == 'nanolink';
+    final victims = _all.where((e) => ownFolder || known.contains(e.path)).map((e) => e.path).toList();
+    if (victims.isEmpty) {
+      toast(context, tr('Здесь нет файлов, принятых через NanoLink', 'No files received through NanoLink here'));
+      return;
+    }
+    final ok = await confirmDialog(
+      context,
+      tr('Очистить полученное?', 'Clear received files?'),
+      tr('Будет удалено файлов: ${victims.length}\nПапка: $_dir${ownFolder ? '' : '\nУдаляются только файлы, принятые через NanoLink.'}\nЭто нельзя отменить.',
+          'Files to delete: ${victims.length}\nFolder: $_dir${ownFolder ? '' : '\nOnly files received through NanoLink are removed.'}\nThis cannot be undone.'),
+      okLabel: tr('Удалить', 'Delete'),
+    );
+    if (ok) await _deleteMany(victims);
   }
 
   @override
@@ -598,16 +644,61 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
                 const SizedBox(height: 10),
               ],
               Row(children: [
-                Text(tr('ПОЛУЧЕНО', 'RECEIVED'), style: TextStyle(color: t.muted, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 0.9)),
-                const Spacer(),
+                Expanded(
+                  child: Text(tr('ПОЛУЧЕННЫЕ ФАЙЛЫ · ${_all.length}', 'RECEIVED FILES · ${_all.length}'), style: TextStyle(color: t.muted, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 0.9)),
+                ),
                 IconBtn(icon: Icons.refresh_rounded, tip: tr('Обновить', 'Refresh'), onTap: _reload),
               ]),
+              const SizedBox(height: 6),
               if (_dir.isNotEmpty)
-                Row(children: [
-                  Expanded(child: Text(_dir, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted, fontSize: 11.5))),
-                  SoftButton(label: tr('В папке', 'Open folder'), icon: Icons.folder_open_rounded, onTap: () => openFolderFlow(context, s, _dir)),
-                ]),
+                GlassCard(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Icon(Icons.folder_rounded, color: t.accent2, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(tr('Файлы лежат в папке', 'Files are stored in'), style: TextStyle(color: t.muted, fontSize: 12)),
+                          const SizedBox(height: 2),
+                          Text(_dir, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                        ]),
+                      ),
+                    ]),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      Expanded(child: SoftButton(label: tr('Открыть папку', 'Open folder'), icon: Icons.folder_open_rounded, onTap: () => openFolderFlow(context, s, _dir))),
+                      const SizedBox(width: 8),
+                      Expanded(child: SoftButton(label: tr('Очистить…', 'Clear…'), icon: Icons.delete_sweep_rounded, onTap: _all.isEmpty ? null : _clearAll)),
+                    ]),
+                  ]),
+                ),
               const SizedBox(height: 8),
+              if (_pick.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GlassCard(
+                    padding: const EdgeInsets.fromLTRB(14, 4, 4, 4),
+                    borderColor: t.accent.withValues(alpha: 0.6),
+                    child: Row(children: [
+                      Expanded(child: Text(tr('Выбрано: ${_pick.length}', 'Selected: ${_pick.length}'), style: const TextStyle(fontWeight: FontWeight.w800))),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          if (_pick.length == _files.length) {
+                            _pick.clear();
+                          } else {
+                            _pick
+                              ..clear()
+                              ..addAll(_files.map((e) => e.path));
+                          }
+                        }),
+                        child: Text(tr('Все', 'All')),
+                      ),
+                      IconBtn(icon: Icons.delete_outline_rounded, tip: tr('Удалить', 'Delete'), onTap: _deleteSelected),
+                      IconBtn(icon: Icons.close_rounded, tip: tr('Отмена', 'Cancel'), onTap: () => setState(_pick.clear)),
+                    ]),
+                  ),
+                ),
               if (_files.isEmpty)
                 GlassCard(
                   padding: const EdgeInsets.all(22),
@@ -617,23 +708,38 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
                     style: TextStyle(color: t.muted),
                   ),
                 )
-              else
+              else ...[
                 for (final e in _files)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: _RecvTile(
                       e: e,
-                      onOpen: () => openReceived(context, e.path),
+                      selected: _pick.contains(e.path),
+                      selecting: _pick.isNotEmpty,
+                      onOpen: () {
+                        if (_pick.isNotEmpty) {
+                          setState(() => _pick.contains(e.path) ? _pick.remove(e.path) : _pick.add(e.path));
+                        } else {
+                          openReceived(context, e.path);
+                        }
+                      },
+                      onLong: () => setState(() => _pick.contains(e.path) ? _pick.remove(e.path) : _pick.add(e.path)),
                       onDelete: () async {
                         final ok = await confirmDialog(context, tr('Удалить файл?', 'Delete file?'), e.name, okLabel: tr('Удалить', 'Delete'));
-                        if (!ok) return;
-                        try {
-                          await File(e.path).delete();
-                        } catch (_) {}
-                        _reload();
+                        if (ok) await _deleteMany([e.path]);
                       },
                     ),
                   ),
+                if (_all.length > _files.length)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      tr('Показаны последние ${_files.length} из ${_all.length}. Остальные - в папке.', 'Showing the latest ${_files.length} of ${_all.length}. The rest are in the folder.'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: t.muted, fontSize: 12),
+                    ),
+                  ),
+              ],
             ],
           ),
         );
@@ -644,33 +750,43 @@ class _ReceivePageState extends State<ReceivePage> with SingleTickerProviderStat
 
 class _RecvTile extends StatelessWidget {
   final FsEntry e;
+  final bool selected;
+  final bool selecting;
   final VoidCallback onOpen;
+  final VoidCallback onLong;
   final VoidCallback onDelete;
-  const _RecvTile({required this.e, required this.onOpen, required this.onDelete});
+  const _RecvTile({required this.e, required this.selected, required this.selecting, required this.onOpen, required this.onLong, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
     final t = NlScope.of(context);
     final st = fileStyle(e);
-    return GlassCard(
-      onTap: onOpen,
-      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-      child: Row(children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(color: st.color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
-          child: Icon(st.icon, color: st.color),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
-            Text('${fmtSize(e.size)} · ${fmtDate(e.modified)}', style: TextStyle(color: t.muted, fontSize: 12)),
+    return GestureDetector(
+      onLongPress: onLong,
+      child: GlassCard(
+        onTap: onOpen,
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+        borderColor: selected ? t.accent2 : null,
+        child: Row(children: [
+          Stack(clipBehavior: Clip.none, children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(color: st.color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
+              child: Icon(st.icon, color: st.color),
+            ),
+            if (selected) Positioned(right: -4, bottom: -4, child: Icon(Icons.check_circle_rounded, size: 20, color: t.accent2)),
           ]),
-        ),
-        IconBtn(icon: Icons.delete_outline_rounded, tip: tr('Удалить', 'Delete'), onTap: onDelete),
-      ]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text('${fmtSize(e.size)} · ${fmtDate(e.modified)}', style: TextStyle(color: t.muted, fontSize: 12)),
+            ]),
+          ),
+          if (!selecting) IconBtn(icon: Icons.delete_outline_rounded, tip: tr('Удалить', 'Delete'), onTap: onDelete) else const SizedBox(width: 8),
+        ]),
+      ),
     );
   }
 }
@@ -1132,7 +1248,10 @@ class _PickerPageState extends State<PickerPage> {
         actions: [
           ListenableBuilder(
             listenable: pane,
-            builder: (_, __) => IconBtn(icon: pane.grid ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleGrid),
+            builder: (ctx, __) => Row(mainAxisSize: MainAxisSize.min, children: [
+                IconBtn(icon: pane.gridNow ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleView),
+                homeButton(ctx),
+              ]),
           ),
         ],
       ),
@@ -1320,7 +1439,10 @@ class _BrowsePageState extends State<BrowsePage> {
           actions: [
             ListenableBuilder(
               listenable: pane,
-              builder: (_, __) => IconBtn(icon: pane.grid ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleGrid),
+              builder: (ctx, __) => Row(mainAxisSize: MainAxisSize.min, children: [
+                IconBtn(icon: pane.gridNow ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleView),
+                homeButton(ctx),
+              ]),
             ),
           ],
         ),
@@ -1556,6 +1678,7 @@ class _MediaPickerPageState extends State<MediaPickerPage> {
               }),
               child: Text(tr('Выбрать все', 'Select all')),
             ),
+          homeButton(context),
         ],
       ),
       body: SafeArea(

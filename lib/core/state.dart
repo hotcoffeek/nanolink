@@ -748,6 +748,12 @@ class AppState extends ChangeNotifier implements Hub {
     notifyListeners();
   }
 
+  void forgetPaths(Set<String> paths) {
+    history.removeWhere((h) => paths.contains(h.path));
+    saveSoon();
+    notifyListeners();
+  }
+
   void clearHistory() {
     history.clear();
     saveSoon();

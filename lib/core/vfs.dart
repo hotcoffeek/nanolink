@@ -79,7 +79,7 @@ abstract class RemoteVfs extends Vfs {
     return h;
   }
 
-  Future<T> guard<T>(Future<T> Function() op, {int tries = 4}) async {
+  Future<T> guard<T>(Future<T> Function() op, {int tries = 3}) async {
     var attempt = 0;
     while (true) {
       try {
@@ -88,7 +88,7 @@ abstract class RemoteVfs extends Vfs {
         if (isFatal(e) || ++attempt >= tries) rethrow;
         resetConn();
         try {
-          await hub.heal(dev);
+          await hub.heal(dev).timeout(const Duration(seconds: 8));
         } catch (_) {}
         await delay(300 * attempt);
       }

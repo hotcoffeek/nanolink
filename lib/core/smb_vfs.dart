@@ -79,7 +79,7 @@ class SmbVfs extends RemoteVfs {
         final c = await _conn();
         final out = <FsEntry>[];
         if (path.isEmpty || path == '/') {
-          final shares = await c.listShares();
+          final shares = await c.listShares().timeout(const Duration(seconds: 20));
           for (final s in shares) {
             final n = _clean(s.path.isNotEmpty ? s.path : s.name);
             if (n.isEmpty || n.endsWith(r'$')) continue;
@@ -87,8 +87,8 @@ class SmbVfs extends RemoteVfs {
           }
           return out;
         }
-        final folder = await c.file(path);
-        final files = await c.listFiles(folder);
+        final folder = await c.file(path).timeout(const Duration(seconds: 20));
+        final files = await c.listFiles(folder).timeout(const Duration(seconds: 25));
         for (final f in files) {
           final n = _clean(f.name);
           if (n.isEmpty || n == '.' || n == '..') continue;

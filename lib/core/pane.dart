@@ -37,6 +37,7 @@ class PaneController extends ChangeNotifier {
   bool loading = false;
   String? error;
   bool grid = false;
+  bool homeGrid = true; // главная: плитки или список
   bool homeEnabled = false; // показывать стартовый экран с плитками
   bool home = false;
   bool _catFromHome = false;
@@ -120,14 +121,33 @@ class PaneController extends ChangeNotifier {
     loading = true;
     error = null;
     notifyListeners();
-    try {
-      final l = await vfs!.list(path);
-      if (gen != _gen) return;
-      entries = l;
-      selected.clear();
-    } catch (e) {
-      if (gen != _gen) return;
-      error = friendlyError(e);
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final v = vfs;
+        if (v == null) break;
+        final l = await v.list(path).timeout(const Duration(seconds: 45));
+        if (gen != _gen) return;
+        entries = l;
+        selected.clear();
+        error = null;
+        break;
+      } catch (e) {
+        if (gen != _gen) return;
+        final f = factory;
+        final fatal = e is FsError && !e.retry;
+        // Роутеры и приставки любят рвать соединение: один раз тихо переподключаемся.
+        if (attempt == 0 && !fatal && f != null && !isLocal && vfs is! PeerVfs) {
+          final old = vfs;
+          vfs = f();
+          unawaited(old?.close().catchError((Object _) {}) ?? Future<void>.value());
+          continue;
+        }
+        error = e is TimeoutException
+            ? tr('Устройство не отвечает больше 45 секунд. Проверьте, что оно включено и в этой же сети. Для роутера попробуйте другой протокол (FTP или SMB) и логин с паролем.',
+                'The device has not answered for 45 seconds. Check that it is on and on the same network. For a router try another protocol (FTP or SMB) and a login.')
+            : friendlyError(e);
+        break;
+      }
     }
     loading = false;
     notifyListeners();
@@ -421,6 +441,18 @@ class PaneController extends ChangeNotifier {
     grid = !grid;
     notifyListeners();
   }
+
+  /// Переключатель вида для текущего экрана: на главной - плитки/список главной, иначе - папка.
+  void toggleView() {
+    if (home && cat == null) {
+      homeGrid = !homeGrid;
+    } else {
+      grid = !grid;
+    }
+    notifyListeners();
+  }
+
+  bool get gridNow => (home && cat == null) ? homeGrid : grid;
 
   // --- Операции -------------------------------------------------------
 

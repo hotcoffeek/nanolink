@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -141,7 +142,7 @@ class _Header extends StatelessWidget {
         ),
         const SizedBox(width: 4),
         if (pane.attached) ...[
-          IconBtn(icon: pane.grid ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleGrid),
+          IconBtn(icon: pane.gridNow ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleView),
           PopupMenuButton<String>(
             tooltip: tr('Сортировка', 'Sort'),
             icon: Icon(Icons.sort_rounded, size: 20, color: t.muted),
@@ -324,6 +325,7 @@ class _Body extends StatelessWidget {
     if (pane.home && pane.cat == null) return ExplorerHome(pane: pane);
     if (pane.cat != null) return _Albums(pane: pane);
     final list = pane.view;
+    if (list.isEmpty && pane.loading) return _Connecting(pane: pane);
     if (list.isEmpty && !pane.loading) {
       return Center(child: Text(tr('Здесь пусто', 'Empty here'), style: TextStyle(color: t.muted)));
     }
@@ -770,6 +772,13 @@ class _ErrorView extends StatelessWidget {
                 await pane.attach(f(), f, d);
               },
             ),
+            if (pane.dev != null)
+              for (final alt in s.protosOf(pane.dev!).where((x) => x != proto))
+                SoftButton(
+                  label: tr('Открыть по ${protoLabel(alt)}', 'Open via ${protoLabel(alt)}'),
+                  icon: Icons.swap_horiz_rounded,
+                  onTap: () => connectFlow(context, s, pane, pane.dev!, proto: alt),
+                ),
             if (proto != null && proto != 'nano' && pane.dev != null)
               SoftButton(
                 label: tr('Логин и пароль', 'Login & password'),
@@ -838,6 +847,68 @@ class _SelectionBar extends StatelessWidget {
         ),
         IconBtn(icon: Icons.close_rounded, tip: tr('Снять выбор', 'Clear'), onTap: pane.clearSelection),
       ]),
+    );
+  }
+}
+
+
+/// Пока устройство отвечает: крутилка, секунды ожидания и подсказка, если долго.
+class _Connecting extends StatefulWidget {
+  final PaneController pane;
+  const _Connecting({required this.pane});
+
+  @override
+  State<_Connecting> createState() => _ConnectingState();
+}
+
+class _ConnectingState extends State<_Connecting> {
+  Timer? _tm;
+  int _sec = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _tm = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _sec++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _tm?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    final p = widget.pane;
+    final proto = protoOfPane(p);
+    final who = p.dev?.title ?? '';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(width: 38, height: 38, child: CircularProgressIndicator(strokeWidth: 3)),
+          const SizedBox(height: 16),
+          Text(
+            tr('Подключаемся${who.isEmpty ? '' : ' к «$who»'}${proto == null ? '' : ' · ${protoLabel(proto)}'}…', 'Connecting${who.isEmpty ? '' : ' to "$who"'}${proto == null ? '' : ' · ${protoLabel(proto)}'}…'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+          ),
+          const SizedBox(height: 6),
+          Text(tr('$_sec с', '$_sec s'), style: TextStyle(color: t.muted)),
+          if (_sec >= 10) ...[
+            const SizedBox(height: 10),
+            Text(
+              tr('Отвечает долго. Роутеры и приставки бывают медленными - подождите ещё немного или нажмите «Назад» и выберите другой протокол.',
+                  'Slow to answer. Routers and boxes can be slow - wait a little or go back and pick another protocol.'),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: t.muted, fontSize: 12.5),
+            ),
+          ],
+        ]),
+      ),
     );
   }
 }

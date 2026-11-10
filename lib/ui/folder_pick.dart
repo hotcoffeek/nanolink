@@ -41,7 +41,7 @@ class _FolderPickPageState extends State<FolderPickPage> {
       },
       child: Scaffold(
       backgroundColor: t.bg,
-      appBar: AppBar(backgroundColor: t.bg, elevation: 0, title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.w800))),
+      appBar: AppBar(backgroundColor: t.bg, elevation: 0, title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.w800)), actions: [homeButton(context)]),
       body: SafeArea(
         child: ListenableBuilder(
           listenable: s,
@@ -127,7 +127,10 @@ class _FolderViewPageState extends State<FolderViewPage> {
           actions: [
             ListenableBuilder(
               listenable: pane,
-              builder: (_, __) => IconBtn(icon: pane.grid ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleGrid),
+              builder: (ctx, __) => Row(mainAxisSize: MainAxisSize.min, children: [
+                IconBtn(icon: pane.gridNow ? Icons.view_list_rounded : Icons.grid_view_rounded, tip: tr('Вид', 'View'), onTap: pane.toggleView),
+                homeButton(ctx),
+              ]),
             ),
           ],
         ),

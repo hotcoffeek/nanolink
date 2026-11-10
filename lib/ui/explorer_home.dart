@@ -107,15 +107,18 @@ class _ExplorerHomeState extends State<ExplorerHome> {
           ]),
         ),
         const SizedBox(height: 14),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 3,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 0.92,
-          children: [for (final x in tiles) _HomeTile(tile: x)],
-        ),
+        if (pane.homeGrid)
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 3,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 0.92,
+            children: [for (final x in tiles) _HomeTile(tile: x)],
+          )
+        else
+          Column(children: [for (final x in tiles) _HomeRow(tile: x)]),
       ],
     );
   }
@@ -188,6 +191,45 @@ class _HomeTile extends StatelessWidget {
               child: Text(tile.label, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
             ),
           ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Тот же раздел, но строкой: для режима «список» на главной.
+class _HomeRow extends StatelessWidget {
+  final _Tile tile;
+  const _HomeRow({required this.tile});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: tile.onTap,
+          child: Ink(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(color: t.surface2, borderRadius: BorderRadius.circular(18), border: Border.all(color: t.border)),
+            child: Row(children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: tile.colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(tile.icon, color: Colors.white, size: 25),
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: Text(tile.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700))),
+              Icon(Icons.chevron_right_rounded, color: t.muted),
+            ]),
+          ),
         ),
       ),
     );

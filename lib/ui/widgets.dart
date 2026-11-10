@@ -352,3 +352,10 @@ void toast(BuildContext context, String msg) {
   m?.hideCurrentSnackBar();
   m?.showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
 }
+
+/// Кнопка «домой»: сразу на главный экран приложения, без многократного «назад».
+Widget homeButton(BuildContext context) => IconBtn(
+      icon: Icons.home_rounded,
+      tip: tr('На главный экран', 'To the main screen'),
+      onTap: () => Navigator.of(context).popUntil((r) => r.isFirst),
+    );
