@@ -153,7 +153,12 @@ class SettingsPage extends StatelessWidget {
                   _Row(
                     title: tr('Не усыплять в фоне', 'Keep running in background'),
                     subtitle: tr('Рекомендуется: отключите оптимизацию батареи для NanoLink, чтобы связь не рвалась при выключенном экране', 'Recommended: disable battery optimization so links survive a locked screen'),
-                    trailing: SoftButton(label: tr('Открыть', 'Open'), onTap: Native.requestBatteryExemption),
+                    trailing: FutureBuilder<bool>(
+                      future: Native.batteryExempt(),
+                      builder: (ctx, snap) => snap.data == true
+                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF3DDC84))
+                          : SoftButton(label: tr('Разрешить', 'Allow'), onTap: Native.requestBatteryExemption),
+                    ),
                   ),
                 ]),
               ),

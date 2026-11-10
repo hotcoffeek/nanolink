@@ -216,9 +216,12 @@ class AppState extends ChangeNotifier implements Hub {
     if (Platform.isAndroid) {
       _lastBind = settings.bindWifi;
       Native.listenShared(pullShared);
+      Native.onRecvAnswer = answerRecv;
       unawaited(Native.startKeepAlive(bindWifi: settings.bindWifi));
       unawaited(applyBind());
       unawaited(Native.requestNotifications());
+      // Один раз просим не усыплять приложение: иначе при выключенном экране телефон пропадает из сети.
+      unawaited(Future<void>.delayed(const Duration(seconds: 8), () => Native.requestBatteryExemption(once: true)));
     }
 
     nics = await localNics(fresh: true);
@@ -722,12 +725,14 @@ class AppState extends ChangeNotifier implements Hub {
     }
     final w = _RecvWait(RecvRequest(id, from, file));
     _recvQ.add(w);
-    if (!foreground) Native.notify(tr('$from хочет отправить файл', '$from wants to send a file'), file, id: 2);
+    if (!foreground) Native.notifyAsk(tr('$from хочет отправить файл', '$from wants to send a file'), file, tr('Принять', 'Accept'), tr('Отклонить', 'Decline'), id: 2);
     notifyListeners();
-    Timer(const Duration(seconds: 25), () {
+    // Отправитель ждёт ответ около 20 секунд, поэтому отвечаем чуть раньше.
+    Timer(const Duration(seconds: 18), () {
       if (!w.done.isCompleted) {
         _recvQ.remove(w);
         w.done.complete(false);
+        if (!foreground) Native.cancelNotify(id: 2);
         notifyListeners();
       }
     });
@@ -737,6 +742,7 @@ class AppState extends ChangeNotifier implements Hub {
   void answerRecv(bool ok) {
     if (_recvQ.isEmpty) return;
     final w = _recvQ.removeAt(0);
+    Native.cancelNotify(id: 2);
     if (ok) _recvOk[w.req.id] = DateTime.now();
     if (!w.done.isCompleted) w.done.complete(ok);
     notifyListeners();

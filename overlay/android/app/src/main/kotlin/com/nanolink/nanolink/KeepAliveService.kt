@@ -23,6 +23,7 @@ import android.os.PowerManager
  */
 class KeepAliveService : Service() {
     private var wifiLock: WifiManager.WifiLock? = null
+    private var wifiLock2: WifiManager.WifiLock? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var callback: ConnectivityManager.NetworkCallback? = null
@@ -70,6 +71,12 @@ class KeepAliveService : Service() {
                 @Suppress("DEPRECATION")
                 val mode = if (Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY else WifiManager.WIFI_MODE_FULL_HIGH_PERF
                 wifiLock = wm.createWifiLock(mode, "nanolink:wifi").apply { setReferenceCounted(false); acquire() }
+            }
+            if (wifiLock2 == null && Build.VERSION.SDK_INT >= 29) {
+                // Низкая задержка действует только при включённом экране; второй замок держит Wi-Fi
+                // «полной мощности» и при выключенном экране (на старых версиях Android так работает всегда).
+                @Suppress("DEPRECATION")
+                wifiLock2 = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "nanolink:wifi2").apply { setReferenceCounted(false); acquire() }
             }
             if (multicastLock == null) {
                 multicastLock = wm.createMulticastLock("nanolink:multicast").apply { setReferenceCounted(false); acquire() }
@@ -120,9 +127,10 @@ class KeepAliveService : Service() {
     override fun onDestroy() {
         unbind()
         try { wifiLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
+        try { wifiLock2?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
         try { multicastLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
         try { wakeLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
-        wifiLock = null; multicastLock = null; wakeLock = null
+        wifiLock = null; wifiLock2 = null; multicastLock = null; wakeLock = null
         super.onDestroy()
     }
 }

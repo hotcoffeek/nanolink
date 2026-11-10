@@ -21,6 +21,12 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
+    companion object {
+        /** Канал нужен приёмнику кнопок уведомления «Принять / Отклонить». */
+        @JvmStatic
+        var chanRef: MethodChannel? = null
+    }
+
     private var chan: MethodChannel? = null
     private val pending = ArrayList<String>()
 
@@ -135,6 +141,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "nanolink/native")
         chan = ch
+        chanRef = ch
         ch.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
@@ -176,7 +183,11 @@ class MainActivity : FlutterActivity() {
                     }
                     "requestBatteryExemption" -> {
                         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !pm.isIgnoringBatteryOptimizations(packageName)) {
+                        val once = call.argument<Boolean>("once") ?: false
+                        val prefs = getSharedPreferences("nl_native", Context.MODE_PRIVATE)
+                        val skip = once && prefs.getBoolean("batAsked", false)
+                        if (once) prefs.edit().putBoolean("batAsked", true).apply()
+                        if (!skip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !pm.isIgnoringBatteryOptimizations(packageName)) {
                             try {
                                 startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
                             } catch (e: Exception) {
@@ -184,6 +195,10 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                         result.success(true)
+                    }
+                    "batteryExempt" -> {
+                        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                        result.success(Build.VERSION.SDK_INT < Build.VERSION_CODES.M || pm.isIgnoringBatteryOptimizations(packageName))
                     }
                     "storageRoots" -> {
                         val roots = ArrayList<String>()
@@ -227,6 +242,46 @@ class MainActivity : FlutterActivity() {
                         val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, "nl_recv") else android.app.Notification.Builder(this)
                         b.setContentTitle(title).setContentText(text).setSmallIcon(applicationInfo.icon).setContentIntent(pi).setAutoCancel(true)
                         nm.notify(id, b.build())
+                        result.success(true)
+                    }
+                    "notifyAsk" -> {
+                        val title = call.argument<String>("title") ?: "NanoLink"
+                        val text = call.argument<String>("text") ?: ""
+                        val yesLabel = call.argument<String>("yes") ?: "OK"
+                        val noLabel = call.argument<String>("no") ?: "No"
+                        val id = call.argument<Int>("id") ?: 2
+                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                        if (Build.VERSION.SDK_INT >= 26) {
+                            nm.createNotificationChannel(android.app.NotificationChannel("nl_recv", "NanoLink", android.app.NotificationManager.IMPORTANCE_HIGH))
+                        }
+                        val flags = android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                        val open = android.app.PendingIntent.getActivity(
+                            this, 0,
+                            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+                            flags)
+                        val yes = android.app.PendingIntent.getBroadcast(
+                            this, 101,
+                            Intent(this, RecvActionReceiver::class.java).setAction("nanolink.RECV_YES").putExtra("id", id),
+                            flags)
+                        val no = android.app.PendingIntent.getBroadcast(
+                            this, 102,
+                            Intent(this, RecvActionReceiver::class.java).setAction("nanolink.RECV_NO").putExtra("id", id),
+                            flags)
+                        val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, "nl_recv") else android.app.Notification.Builder(this)
+                        b.setContentTitle(title).setContentText(text).setSmallIcon(applicationInfo.icon)
+                            .setContentIntent(open).setAutoCancel(true)
+                            .setVisibility(android.app.Notification.VISIBILITY_PUBLIC)
+                            .addAction(android.app.Notification.Action.Builder(null, yesLabel, yes).build())
+                            .addAction(android.app.Notification.Action.Builder(null, noLabel, no).build())
+                        if (Build.VERSION.SDK_INT >= 26) b.setTimeoutAfter(20000)
+                        @Suppress("DEPRECATION")
+                        if (Build.VERSION.SDK_INT < 26) b.setPriority(android.app.Notification.PRIORITY_HIGH)
+                        nm.notify(id, b.build())
+                        result.success(true)
+                    }
+                    "cancelNotify" -> {
+                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                        nm.cancel(call.argument<Int>("id") ?: 2)
                         result.success(true)
                     }
                     "storageStats" -> {

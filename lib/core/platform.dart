@@ -33,9 +33,12 @@ class Native {
     await _call<bool>('requestNotifications');
   }
 
-  static Future<void> requestBatteryExemption() async {
-    await _call<bool>('requestBatteryExemption');
+  static Future<void> requestBatteryExemption({bool once = false}) async {
+    await _call<bool>('requestBatteryExemption', {'once': once});
   }
+
+  /// Исключено ли приложение из экономии батареи (иначе при выключенном экране связь может рваться).
+  static Future<bool> batteryExempt() async => (await _call<bool>('batteryExempt')) ?? true;
 
   static Future<List<String>> storageRoots() async {
     final r = await _call<List<dynamic>>('storageRoots');
@@ -49,8 +52,24 @@ class Native {
     if (!Platform.isAndroid) return;
     _ch.setMethodCallHandler((call) async {
       if (call.method == 'sharedReady') await cb();
+      if (call.method == 'recvAnswer') {
+        final a = call.arguments;
+        onRecvAnswer?.call(a is Map && a['ok'] == true);
+      }
       return null;
     });
+  }
+
+  /// Ответ из кнопок уведомления «Принять / Отклонить».
+  static void Function(bool ok)? onRecvAnswer;
+
+  /// Уведомление с кнопками «Принять» и «Отклонить» (видно при выключенном экране).
+  static Future<void> notifyAsk(String title, String text, String yes, String no, {int id = 2}) async {
+    await _call<bool>('notifyAsk', {'title': title, 'text': text, 'yes': yes, 'no': no, 'id': id});
+  }
+
+  static Future<void> cancelNotify({int id = 2}) async {
+    await _call<bool>('cancelNotify', {'id': id});
   }
 
   static Future<void> notify(String title, String text, {int id = 1}) async {

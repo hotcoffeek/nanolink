@@ -65,6 +65,9 @@
             android:name=".KeepAliveService"
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
+        <receiver
+            android:name=".RecvActionReceiver"
+            android:exported="false"/>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

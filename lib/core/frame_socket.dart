@@ -44,10 +44,23 @@ class FrameSocket {
   bool closed = false;
   bool _paused = false;
 
+  /// TCP keep-alive: соединение не «засыпает» и не отваливается по таймауту роутера/NAT,
+  /// пока экран телефона выключен. Значения Linux/Android; на других системах молча пропускается.
+  static void _keepAlive(Socket socket) {
+    if (!Platform.isAndroid && !Platform.isLinux) return;
+    try {
+      socket.setRawOption(RawSocketOption.fromBool(1, 9, true)); // SOL_SOCKET, SO_KEEPALIVE
+      socket.setRawOption(RawSocketOption.fromInt(6, 4, 10)); // IPPROTO_TCP, TCP_KEEPIDLE: 10 с
+      socket.setRawOption(RawSocketOption.fromInt(6, 5, 5)); // TCP_KEEPINTVL: 5 с
+      socket.setRawOption(RawSocketOption.fromInt(6, 6, 6)); // TCP_KEEPCNT: 6 проб
+    } catch (_) {}
+  }
+
   FrameSocket(this.socket) {
     try {
       socket.setOption(SocketOption.tcpNoDelay, true);
     } catch (_) {}
+    _keepAlive(socket);
     _sub = socket.listen(
       (d) {
         _q.add(d);
