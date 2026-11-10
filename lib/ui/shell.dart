@@ -6,6 +6,7 @@ import 'devices_page.dart';
 import 'dialogs.dart';
 import 'explorer_page.dart';
 import 'painters.dart';
+import 'phone.dart';
 import 'settings_page.dart';
 import 'theme.dart';
 import 'transfers_page.dart';
@@ -69,6 +70,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
         Positioned.fill(child: AmbientBackground(theme: t)),
         SafeArea(
           child: LayoutBuilder(builder: (context, c) {
+            if (c.maxWidth < 700) return const PhoneHome();
             final wide = c.maxWidth >= 900;
             final stack = ListenableBuilder(
               listenable: s,

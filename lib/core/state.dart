@@ -345,6 +345,65 @@ class AppState extends ChangeNotifier implements Hub {
     await p.attach(mk(), mk, d);
   }
 
+  /// Папка, куда складываются принятые/скачанные файлы на этом устройстве.
+  Future<String> localInbox() async {
+    final v = LocalVfs();
+    String base = '';
+    try {
+      for (final p in await v.places()) {
+        if (p.icon == 'downloads') {
+          base = p.path;
+          break;
+        }
+      }
+      if (base.isEmpty) base = await v.start();
+    } catch (_) {}
+    final dir = v.join(base, 'NanoLink');
+    try {
+      await v.mkdir(dir);
+    } catch (_) {}
+    return dir;
+  }
+
+  /// Отправить файлы на устройство одним нажатием (папка «Загрузки/NanoLink» на той стороне).
+  /// Возвращает текст ошибки или null; 'pick' - нужно выбрать папку вручную.
+  Future<String?> sendFiles(Device d, List<FsEntry> items) async {
+    if (items.isEmpty) return tr('Ничего не выбрано', 'Nothing selected');
+    if (!d.has('nano')) return 'pick';
+    Vfs mk() => makeVfs(d, 'nano');
+    final v = mk();
+    var dir = '';
+    try {
+      for (final p in await v.places()) {
+        if (p.icon == 'downloads') {
+          dir = p.path;
+          break;
+        }
+      }
+      if (dir.isEmpty) dir = await v.start();
+    } catch (_) {}
+    if (dir.isEmpty || dir == '/') {
+      await v.close();
+      return 'pick';
+    }
+    dir = v.join(dir, 'NanoLink');
+    try {
+      await v.mkdir(dir);
+    } catch (_) {}
+    await v.close();
+    transfers.enqueue(
+      srcFactory: () => LocalVfs(),
+      dstFactory: mk,
+      srcDev: null,
+      dstDev: d,
+      items: items,
+      dstDir: dir,
+      move: false,
+      conflict: settings.conflict,
+    );
+    return null;
+  }
+
   void swapPanes() {
     final t = left;
     left = right;

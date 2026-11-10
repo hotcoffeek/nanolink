@@ -36,7 +36,9 @@ const Set<String> _imgExt = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'};
 
 class PaneView extends StatelessWidget {
   final PaneController pane;
-  const PaneView({super.key, required this.pane});
+  final bool hideHeader;
+  final bool hideSelBar;
+  const PaneView({super.key, required this.pane, this.hideHeader = false, this.hideSelBar = false});
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +61,7 @@ class PaneView extends StatelessWidget {
           child: ListenableBuilder(
             listenable: pane,
             builder: (context, _) => Column(children: [
-              _Header(pane: pane),
+              if (!hideHeader) _Header(pane: pane),
               _PathBar(pane: pane),
               _Strip(pane: pane),
               Expanded(
@@ -68,7 +70,7 @@ class PaneView extends StatelessWidget {
                   if (pane.loading) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
                 ]),
               ),
-              if (pane.selected.isNotEmpty) _SelectionBar(pane: pane),
+              if (pane.selected.isNotEmpty && !hideSelBar) _SelectionBar(pane: pane),
             ]),
           ),
         );
