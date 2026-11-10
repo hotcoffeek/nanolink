@@ -27,6 +27,12 @@ jobs:
           rm -rf test
           cp -r overlay/android/. android/
       - run: flutter pub get
+      - name: Patch dartssh2 for new Dart
+        run: |
+          F=$(find $HOME/.pub-cache -path '*dartssh2-2.14.0/lib/src/sftp/sftp_client.dart' | head -1)
+          echo "patching $F"
+          sed -i -E 's/(if \(bytess?Recieved >= length)\) \{/\1!) {/' "$F"
+          grep -n "Recieved >= length" "$F"
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
