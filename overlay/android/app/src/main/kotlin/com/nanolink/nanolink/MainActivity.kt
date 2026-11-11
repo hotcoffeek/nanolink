@@ -21,6 +21,9 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
+    /** Эскизы считаем в 3 потока, а не по потоку на каждую плитку: на слабых телефонах так не лагает. */
+    private val thumbPool: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newFixedThreadPool(3)
+
     companion object {
         /** Канал нужен приёмнику кнопок уведомления «Принять / Отклонить». */
         @JvmStatic
@@ -348,7 +351,7 @@ class MainActivity : FlutterActivity() {
                     "thumb" -> {
                         val path = call.argument<String>("path") ?: ""
                         val size = call.argument<Int>("size") ?: 256
-                        Thread {
+                        thumbPool.execute {
                             var bytes: ByteArray? = null
                             try {
                                 val low = path.lowercase()
@@ -369,7 +372,7 @@ class MainActivity : FlutterActivity() {
                             } catch (e: Exception) {
                             }
                             runOnUiThread { result.success(bytes) }
-                        }.start()
+                        }
                     }
                     "openFile" -> {
                         val path = call.argument<String>("path") ?: ""

@@ -32,7 +32,7 @@ class PhoneHome extends StatefulWidget {
 }
 
 class _PhoneHomeState extends State<PhoneHome> {
-  static const int tabHome = 0, tabRecv = 1, tabSend = 2, tabTransfers = 3;
+  static const int tabHome = 0, tabRecv = 1, tabSend = 2, tabTransfers = 3, tabSettings = 4;
   int _tab = tabHome;
   final List<int> _hist = []; // стек вкладок для жеста «назад»
   AppState? _s;
@@ -117,12 +117,13 @@ class _PhoneHomeState extends State<PhoneHome> {
       },
       child: Column(children: [
         Expanded(
+          // Скрытые вкладки не крутят анимации (пульс радара и т.п.): на слабых телефонах это заметно экономит кадры
           child: IndexedStack(index: _tab, children: [
-            HomePage(onGoSend: () => _go(tabSend)),
-            const ReceivePage(),
-            SendPage(key: _sendKey, onSent: () => _go(tabTransfers)),
-            const TransfersPage(),
-            const SettingsPage(),
+            TickerMode(enabled: _tab == tabHome, child: HomePage(onGoSend: () => _go(tabSend))),
+            TickerMode(enabled: _tab == tabRecv, child: const ReceivePage()),
+            TickerMode(enabled: _tab == tabSend, child: SendPage(key: _sendKey, onSent: () => _go(tabTransfers))),
+            TickerMode(enabled: _tab == tabTransfers, child: const TransfersPage()),
+            TickerMode(enabled: _tab == tabSettings, child: const SettingsPage()),
           ]),
         ),
         ListenableBuilder(
@@ -1666,6 +1667,8 @@ class _MediaPickerPageState extends State<MediaPickerPage> {
   @override
   Widget build(BuildContext context) {
     final t = NlScope.of(context);
+    final s = AppScope.of(context);
+    final listMode = s.settings.pickList;
     final view = _view;
     final names = _buckets.keys.toList()..sort((a, b) => _buckets[b]!.compareTo(_buckets[a]!));
     return Scaffold(
@@ -1685,6 +1688,12 @@ class _MediaPickerPageState extends State<MediaPickerPage> {
               }),
               child: Text(tr('Выбрать все', 'Select all')),
             ),
+          IconBtn(
+            icon: listMode ? Icons.grid_view_rounded : Icons.view_list_rounded,
+            tip: listMode ? tr('Плитки', 'Grid') : tr('Список с размером и датой', 'List with size and date'),
+            size: 24,
+            onTap: () => s.setPickList(!listMode),
+          ),
           homeButton(context),
         ],
       ),
@@ -1716,28 +1725,68 @@ class _MediaPickerPageState extends State<MediaPickerPage> {
                     Expanded(
                       child: view.isEmpty
                           ? Center(child: Text(widget.video ? tr('Видео не найдено', 'No videos found') : tr('Фото не найдены', 'No photos found'), style: TextStyle(color: t.muted)))
-                          : GridView.builder(
-                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-                              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 130, mainAxisSpacing: 4, crossAxisSpacing: 4),
-                              itemCount: view.length,
-                              itemBuilder: (_, i) {
-                                final e = view[i];
-                                final on = _sel.contains(e.path);
-                                return GestureDetector(
-                                  onTap: () => setState(() => on ? _sel.remove(e.path) : _sel.add(e.path)),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(10),
-                                    child: Stack(fit: StackFit.expand, children: [
-                                      _Thumb(path: e.path, video: widget.video),
-                                      if (on) Container(color: t.accent.withValues(alpha: 0.35)),
-                                      if (on) Positioned(right: 6, top: 6, child: Icon(Icons.check_circle_rounded, color: Colors.white, size: 24, shadows: [Shadow(color: t.accent, blurRadius: 8)])),
-                                      if (widget.video) const Positioned(left: 6, bottom: 6, child: Icon(Icons.play_circle_fill_rounded, color: Colors.white70, size: 22)),
-                                      if (on) DecoratedBox(decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: t.accent2, width: 3))),
-                                    ]),
-                                  ),
-                                );
-                              },
-                            ),
+                          : listMode
+                              ? ListView.builder(
+                                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                                  itemCount: view.length,
+                                  itemExtent: 72,
+                                  addAutomaticKeepAlives: false,
+                                  itemBuilder: (_, i) {
+                                    final e = view[i];
+                                    final on = _sel.contains(e.path);
+                                    return _MListRow(
+                                      key: ValueKey(e.path),
+                                      item: e,
+                                      video: widget.video,
+                                      selected: on,
+                                      onTap: () => setState(() => on ? _sel.remove(e.path) : _sel.add(e.path)),
+                                    );
+                                  },
+                                )
+                              : GridView.builder(
+                                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 130, mainAxisSpacing: 4, crossAxisSpacing: 4),
+                                  itemCount: view.length,
+                                  addAutomaticKeepAlives: false,
+                                  itemBuilder: (_, i) {
+                                    final e = view[i];
+                                    final on = _sel.contains(e.path);
+                                    return RepaintBoundary(
+                                      key: ValueKey(e.path),
+                                      child: GestureDetector(
+                                        onTap: () => setState(() => on ? _sel.remove(e.path) : _sel.add(e.path)),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(10),
+                                          child: Stack(fit: StackFit.expand, children: [
+                                            _Thumb(path: e.path, video: widget.video),
+                                            // размер и дата прямо на плитке
+                                            Positioned(
+                                              left: 0,
+                                              right: 0,
+                                              bottom: 0,
+                                              child: Container(
+                                                padding: const EdgeInsets.fromLTRB(6, 10, 6, 4),
+                                                decoration: const BoxDecoration(
+                                                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00000000), Color(0xCC000000)]),
+                                                ),
+                                                child: Text(
+                                                  '${fmtSize(e.size)} · ${_shortDate(e.modified)}',
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w700),
+                                                ),
+                                              ),
+                                            ),
+                                            if (on) Container(color: t.accent.withValues(alpha: 0.35)),
+                                            if (on) Positioned(right: 6, top: 6, child: Icon(Icons.check_circle_rounded, color: Colors.white, size: 24, shadows: [Shadow(color: t.accent, blurRadius: 8)])),
+                                            if (widget.video) const Positioned(left: 6, top: 6, child: Icon(Icons.play_circle_fill_rounded, color: Colors.white70, size: 22)),
+                                            if (on) DecoratedBox(decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: t.accent2, width: 3))),
+                                          ]),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
                     ),
                   ]),
       ),
@@ -1752,6 +1801,70 @@ class _MediaPickerPageState extends State<MediaPickerPage> {
                 ),
               ),
             ),
+    );
+  }
+}
+
+String _shortDate(DateTime d) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(d.day)}.${two(d.month)}.${d.year % 100}';
+}
+
+/// Строка списка: эскиз, имя, размер, дата и папка.
+class _MListRow extends StatelessWidget {
+  final _MItem item;
+  final bool video;
+  final bool selected;
+  final VoidCallback onTap;
+  const _MListRow({super.key, required this.item, required this.video, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NlScope.of(context);
+    return RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Material(
+          color: selected ? t.accent.withValues(alpha: 0.18) : t.surface,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: selected ? t.accent2 : t.border, width: selected ? 2 : 1),
+              ),
+              child: Row(children: [
+                SizedBox(
+                  width: 54,
+                  height: 54,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(9),
+                    child: Stack(fit: StackFit.expand, children: [
+                      _Thumb(path: item.path, video: video),
+                      if (video) const Center(child: Icon(Icons.play_circle_fill_rounded, color: Colors.white70, size: 22)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.text)),
+                    const SizedBox(height: 3),
+                    Text('${fmtSize(item.size)}  ·  ${fmtDate(item.modified)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: t.muted)),
+                    if (item.bucket.isNotEmpty) Text(item.bucket, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: t.muted.withValues(alpha: 0.8))),
+                  ]),
+                ),
+                const SizedBox(width: 8),
+                Icon(selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, color: selected ? t.accent2 : t.muted, size: 26),
+                const SizedBox(width: 6),
+              ]),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1788,23 +1901,38 @@ class _Bucket extends StatelessWidget {
   }
 }
 
-class _Thumb extends StatelessWidget {
+class _Thumb extends StatefulWidget {
   final String path;
   final bool video;
   const _Thumb({required this.path, required this.video});
 
   @override
+  State<_Thumb> createState() => _ThumbState();
+}
+
+class _ThumbState extends State<_Thumb> {
+  late Future<Uint8List?> _f = Native.thumb(widget.path, size: 256);
+
+  @override
+  void didUpdateWidget(covariant _Thumb old) {
+    super.didUpdateWidget(old);
+    if (old.path != widget.path) _f = Native.thumb(widget.path, size: 256);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final t = NlScope.of(context);
-    if (!video) {
-      return Image.file(File(path), fit: BoxFit.cover, cacheWidth: 300, gaplessPlayback: true, errorBuilder: (_, __, ___) => Container(color: t.surface2));
-    }
     return FutureBuilder<Uint8List?>(
-      future: Native.thumb(path, size: 256),
+      future: _f,
       builder: (_, snap) {
         final b = snap.data;
-        if (b == null) return Container(color: t.surface2, child: Icon(Icons.movie_rounded, color: t.muted));
-        return Image.memory(b, fit: BoxFit.cover, gaplessPlayback: true);
+        if (b != null) return Image.memory(b, fit: BoxFit.cover, gaplessPlayback: true);
+        if (snap.connectionState != ConnectionState.done) return Container(color: t.surface2);
+        // системный эскиз недоступен (старый Android) - читаем сам файл в уменьшенном виде
+        if (!widget.video) {
+          return Image.file(File(widget.path), fit: BoxFit.cover, cacheWidth: 200, gaplessPlayback: true, errorBuilder: (_, __, ___) => Container(color: t.surface2));
+        }
+        return Container(color: t.surface2, child: Icon(Icons.movie_rounded, color: t.muted));
       },
     );
   }

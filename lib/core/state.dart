@@ -802,6 +802,12 @@ class AppState extends ChangeNotifier implements Hub {
     notifyListeners();
   }
 
+  void setPickList(bool v) {
+    settings.pickList = v;
+    saveSoon();
+    notifyListeners();
+  }
+
   void setAskReceive(bool v) {
     settings.askReceive = v;
     saveSoon();

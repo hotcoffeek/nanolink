@@ -47,6 +47,7 @@ class Settings {
   bool autoPair = true;
   bool askReceive = true;
   String inboxDir = '';
+  bool pickList = false; // галерея выбора фото/видео: список вместо сетки
   String folderApp = ''; // '' - спрашивать, 'nanolink' - встроенный проводник, иначе пакет приложения
   String folderAppLabel = '';
   Map<String, String> dests = {}; // id устройства -> запомненная папка назначения на нём
@@ -62,6 +63,7 @@ class Settings {
         'autoPair': autoPair,
         'askReceive': askReceive,
         'inboxDir': inboxDir,
+        'pickList': pickList,
         'folderApp': folderApp,
         'folderAppLabel': folderAppLabel,
         'dests': dests,
@@ -79,6 +81,7 @@ class Settings {
     autoPair = (j['autoPair'] ?? autoPair) as bool;
     askReceive = (j['askReceive'] ?? askReceive) as bool;
     inboxDir = (j['inboxDir'] ?? inboxDir).toString();
+    pickList = (j['pickList'] ?? pickList) as bool;
     folderApp = (j['folderApp'] ?? folderApp).toString();
     folderAppLabel = (j['folderAppLabel'] ?? folderAppLabel).toString();
     final dm = j['dests'];

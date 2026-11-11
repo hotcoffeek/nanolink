@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -8,6 +9,7 @@ import '../core/ftp_vfs.dart';
 import '../core/i18n.dart';
 import '../core/models.dart';
 import '../core/pane.dart';
+import '../core/platform.dart';
 import '../core/peer.dart';
 import '../core/sftp_vfs.dart';
 import '../core/smb_vfs.dart';
@@ -375,15 +377,7 @@ Widget _thumb(PaneController pane, FsEntry e, double size, FileStyle st) {
   if (pane.isLocal && !e.isDir && _imgExt.contains(e.ext) && e.size < 40 * 1024 * 1024) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: Image.file(
-        File(e.path),
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        cacheWidth: (size * 3).round(),
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => Icon(st.icon, color: st.color, size: size * 0.7),
-      ),
+      child: _LocalThumb(path: e.path, width: size, height: size, st: st, iconSize: size * 0.7),
     );
   }
   if (!pane.isLocal && pane.vfs != null && !e.isDir && _imgExt.contains(e.ext) && e.size > 0 && e.size < 8 * 1024 * 1024) {
@@ -570,19 +564,49 @@ class _GridTile extends StatelessWidget {
   }
 }
 
+/// Эскиз локальной картинки: берём готовый системный (быстро, мало памяти), а не декодируем всё фото.
+class _LocalThumb extends StatefulWidget {
+  final String path;
+  final double width;
+  final double height;
+  final FileStyle st;
+  final double iconSize;
+  const _LocalThumb({required this.path, required this.width, required this.height, required this.st, required this.iconSize});
+
+  @override
+  State<_LocalThumb> createState() => _LocalThumbState();
+}
+
+class _LocalThumbState extends State<_LocalThumb> {
+  late Future<Uint8List?> _f = Native.thumb(widget.path, size: 256);
+
+  @override
+  void didUpdateWidget(covariant _LocalThumb old) {
+    super.didUpdateWidget(old);
+    if (old.path != widget.path) _f = Native.thumb(widget.path, size: 256);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = widget.st;
+    return FutureBuilder<Uint8List?>(
+      future: _f,
+      builder: (_, snap) {
+        final b = snap.data;
+        if (b != null) return Image.memory(b, width: widget.width, height: widget.height, fit: BoxFit.cover, gaplessPlayback: true);
+        if (snap.connectionState != ConnectionState.done) return SizedBox(width: widget.width, height: widget.height);
+        return Image.file(File(widget.path),
+            width: widget.width, height: widget.height, fit: BoxFit.cover, cacheWidth: 240, gaplessPlayback: true, errorBuilder: (_, __, ___) => Icon(st.icon, color: st.color, size: widget.iconSize));
+      },
+    );
+  }
+}
+
 Widget _thumbFill(PaneController pane, FsEntry e, Size box, FileStyle st) {
   if (pane.isLocal && !e.isDir && _imgExt.contains(e.ext) && e.size < 40 * 1024 * 1024) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
-      child: Image.file(
-        File(e.path),
-        width: box.width,
-        height: box.height,
-        fit: BoxFit.cover,
-        cacheWidth: 260,
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => Icon(st.icon, color: st.color, size: 46),
-      ),
+      child: _LocalThumb(path: e.path, width: box.width, height: box.height, st: st, iconSize: 46),
     );
   }
   if (!pane.isLocal && pane.vfs != null && !e.isDir && _imgExt.contains(e.ext) && e.size > 0 && e.size < 8 * 1024 * 1024) {

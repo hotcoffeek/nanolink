@@ -125,6 +125,13 @@ class Native {
   static final Map<String, Future<Uint8List?>> _thumbs = {};
 
   static Future<Uint8List?> thumb(String path, {int size = 256}) {
+    if (_thumbs.length > 500) {
+      // не копим эскизы бесконечно: выкидываем самые старые
+      final old = _thumbs.keys.take(150).toList();
+      for (final k in old) {
+        _thumbs.remove(k);
+      }
+    }
     return _thumbs.putIfAbsent('$path|$size', () => _call<Uint8List>('thumb', {'path': path, 'size': size}));
   }
 

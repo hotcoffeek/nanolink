@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
@@ -246,6 +247,13 @@ class PeerVfs extends RemoteVfs {
       fs.sendJson({'op': 'put', 'p': path, 'append': append, 'len': len});
       final r = await fs.readJson(idle: const Duration(seconds: 20));
       if (r['ok'] != true) throw FsError((r['err'] ?? 'Не удалось записать файл').toString());
+      // Маленький буфер отправки: данные «в пути» не копятся в памяти ОС, и полоска прогресса
+      // идёт вровень с реальной отправкой, а не заполняется сразу.
+      if (Platform.isAndroid || Platform.isLinux) {
+        try {
+          fs.socket.setRawOption(RawSocketOption.fromInt(1, 7, 256 * 1024)); // SOL_SOCKET, SO_SNDBUF
+        } catch (_) {}
+      }
       await fs.socket.addStream(data);
       final d = await fs.readJson(idle: const Duration(seconds: 30));
       if (d['ok'] != true) throw FsError((d['err'] ?? 'Ошибка записи').toString(), retry: true);
