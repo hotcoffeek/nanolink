@@ -5,7 +5,42 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+env:
+  FLUTTER_CHANNEL: stable
+
 jobs:
+  windows:
+    name: Windows (.zip)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - name: Generate platform folders
+        run: |
+          mkdir -p /tmp/keep && cp -r lib /tmp/keep/lib && cp pubspec.yaml /tmp/keep/pubspec.yaml
+          flutter create --org com.nanolink --project-name nanolink --platforms=windows .
+          rm -rf lib && cp -r /tmp/keep/lib lib && cp /tmp/keep/pubspec.yaml pubspec.yaml
+          rm -rf test
+      - run: flutter pub get
+      - name: Set window title
+        run: |
+          sed -i 's/L"nanolink"/L"NanoLink"/g' windows/runner/main.cpp || true
+      - run: flutter build windows --release
+      - name: Pack
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath NanoLink-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NanoLink-windows
+          path: NanoLink-windows.zip
+
   android:
     name: Android (.apk)
     runs-on: ubuntu-latest
@@ -17,7 +52,7 @@ jobs:
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
       - name: Generate platform folders
         run: |
@@ -26,6 +61,52 @@ jobs:
           rm -rf lib && cp -r /tmp/keep/lib lib && cp /tmp/keep/pubspec.yaml pubspec.yaml
           rm -rf test
           cp -r overlay/android/. android/
+      - name: Add SMB library (jcifs-ng)
+        run: |
+          if [ -f android/app/build.gradle.kts ]; then
+            cat >> android/app/build.gradle.kts <<'EOF'
+
+          dependencies {
+              implementation("eu.agno3.jcifs:jcifs-ng:2.1.10")
+          }
+
+          android {
+              buildTypes {
+                  getByName("release") {
+                      isMinifyEnabled = false
+                      isShrinkResources = false
+                  }
+              }
+              packaging {
+                  resources {
+                      excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/versions/9/OSGI-INF/MANIFEST.MF")
+                  }
+              }
+          }
+          EOF
+          else
+            cat >> android/app/build.gradle <<'EOF'
+
+          dependencies {
+              implementation 'eu.agno3.jcifs:jcifs-ng:2.1.10'
+          }
+
+          android {
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      shrinkResources false
+                  }
+              }
+              packagingOptions {
+                  resources {
+                      excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*', 'META-INF/versions/9/OSGI-INF/MANIFEST.MF']
+                  }
+              }
+          }
+          EOF
+          fi
+          tail -25 android/app/build.gradle* || true
       - run: flutter pub get
       - name: Patch dartssh2 for new Dart
         run: |
@@ -38,3 +119,31 @@ jobs:
         with:
           name: NanoLink-android
           path: build/app/outputs/flutter-apk/app-release.apk
+
+  linux:
+    name: Linux / Steam Deck (.tar.gz)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - name: Generate platform folders
+        run: |
+          mkdir -p /tmp/keep && cp -r lib /tmp/keep/lib && cp pubspec.yaml /tmp/keep/pubspec.yaml
+          flutter create --org com.nanolink --project-name nanolink --platforms=linux .
+          rm -rf lib && cp -r /tmp/keep/lib lib && cp /tmp/keep/pubspec.yaml pubspec.yaml
+          rm -rf test
+      - run: flutter pub get
+      - run: flutter build linux --release
+      - run: tar -czf NanoLink-linux.tar.gz -C build/linux/x64/release/bundle .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NanoLink-linux
+          path: NanoLink-linux.tar.gz
