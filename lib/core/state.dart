@@ -17,6 +17,7 @@ import 'peer_server.dart';
 import 'platform.dart';
 import 'scanner.dart';
 import 'sftp_vfs.dart';
+import 'smb_native_vfs.dart';
 import 'smb_vfs.dart';
 import 'store.dart';
 import 'transfer.dart';
@@ -407,7 +408,7 @@ class AppState extends ChangeNotifier implements Hub {
       case 'nano':
         return PeerVfs(d, this);
       case 'smb':
-        return SmbVfs(d, this);
+        return Platform.isAndroid ? NativeSmbVfs(d, this) : SmbVfs(d, this);
       case 'sftp':
         return SftpVfs(d, this);
       case 'ftp':

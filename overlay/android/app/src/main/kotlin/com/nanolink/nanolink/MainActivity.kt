@@ -145,6 +145,7 @@ class MainActivity : FlutterActivity() {
         val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "nanolink/native")
         chan = ch
         chanRef = ch
+        SmbBridge.register(flutterEngine.dartExecutor.binaryMessenger)
         ch.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {

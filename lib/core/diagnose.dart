@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:dartssh2/dartssh2.dart';
 
 import 'ftp_vfs.dart';
 import 'models.dart';
+import 'smb_native_vfs.dart';
 import 'smb_probe.dart';
 import 'smb_vfs.dart';
 import 'util.dart';
@@ -30,7 +33,11 @@ Future<String> diagnoseDevice(Device d) async {
     out.add('');
     out.addAll(await smbProbe(host));
     out.add('');
-    out.addAll(await smbDiagnose(d));
+    if (Platform.isAndroid) {
+      out.addAll(await nativeSmbDiagnose(d));
+    } else {
+      out.addAll(await smbDiagnose(d));
+    }
   }
   if (open[22] == true) {
     out.add('');
