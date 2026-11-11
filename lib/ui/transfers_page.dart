@@ -38,7 +38,17 @@ class TransfersPage extends StatelessWidget {
           children: [
             Row(children: [
               Expanded(child: Text(tr('Передачи', 'Transfers'), style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
-              SoftButton(label: tr('Очистить', 'Clear'), icon: Icons.cleaning_services_rounded, onTap: jobs.any((j) => j.finished) ? eng.clearFinished : null),
+              SoftButton(
+                label: tr('Очистить список', 'Clear list'),
+                icon: Icons.cleaning_services_rounded,
+                // одна кнопка: завершённые передачи и история получения (файлы на телефоне остаются)
+                onTap: (jobs.any((j) => j.finished) || hist.isNotEmpty)
+                    ? () {
+                        eng.clearFinished();
+                        s.clearHistory();
+                      }
+                    : null,
+              ),
             ]),
             const SizedBox(height: 14),
             if (jobs.isEmpty && incoming.isEmpty && hist.isEmpty)
@@ -82,10 +92,7 @@ class TransfersPage extends StatelessWidget {
               for (final j in jobs) Padding(padding: const EdgeInsets.only(bottom: 10), child: _JobCard(j: j, eng: eng, t: t)),
             ],
             if (hist.isNotEmpty) ...[
-              head(
-                tr('ИСТОРИЯ ПОЛУЧЕНИЯ', 'RECEIVED HISTORY'),
-                trailing: IconBtn(icon: Icons.delete_sweep_rounded, tip: tr('Очистить историю', 'Clear history'), onTap: s.clearHistory),
-              ),
+              head(tr('ИСТОРИЯ ПОЛУЧЕНИЯ', 'RECEIVED HISTORY')),
               for (final h in hist) Padding(padding: const EdgeInsets.only(bottom: 8), child: _HistTile(h: h, s: s)),
             ],
           ],

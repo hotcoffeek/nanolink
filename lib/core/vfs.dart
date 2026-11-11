@@ -59,6 +59,45 @@ abstract class Vfs {
 }
 
 /// База для сетевых ФС: повтор операций с «самолечением» при обрыве.
+/// Ограничитель подключений к одному хосту. У роутеров и NAS обычно «не больше 5 одновременных подключений»;
+/// если занять все места, остальные устройства (и ПК-версия) перестают подключаться. Лишние ждут очереди.
+class HostSlots {
+  static final Map<String, int> _used = {};
+  static final Map<String, List<Completer<void>>> _wait = {};
+
+  static Future<void> acquire(String key, {int max = 3, Duration timeout = const Duration(seconds: 30)}) async {
+    if ((_used[key] ?? 0) < max) {
+      _used[key] = (_used[key] ?? 0) + 1;
+      return;
+    }
+    final c = Completer<void>();
+    _wait.putIfAbsent(key, () => <Completer<void>>[]).add(c);
+    try {
+      await c.future.timeout(timeout);
+    } on TimeoutException {
+      // Долго ждали: либо идут большие передачи, либо где-то «потерялось» закрытие соединения.
+      // Чтобы не блокироваться навсегда, берём место сверх лимита.
+      _wait[key]?.remove(c);
+      _used[key] = (_used[key] ?? 0) + 1;
+    }
+  }
+
+  static void release(String key) {
+    final q = _wait[key];
+    if (q != null && q.isNotEmpty) {
+      // место передаём первому в очереди, счётчик не меняется
+      q.removeAt(0).complete();
+      return;
+    }
+    final n = (_used[key] ?? 1) - 1;
+    if (n <= 0) {
+      _used.remove(key);
+    } else {
+      _used[key] = n;
+    }
+  }
+}
+
 abstract class RemoteVfs extends Vfs {
   final Device dev;
   final Hub hub;

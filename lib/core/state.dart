@@ -969,7 +969,10 @@ class AppState extends ChangeNotifier implements Hub {
         }
         d.host = h.ip;
         if (d.kind == DeviceKind.unknown && kind != DeviceKind.unknown) d.kind = kind;
-        if (d.name == d.host || d.name.startsWith('ip:')) d.name = h.bestName;
+        // служебные имена вроде «WPS Access Point» заменяем настоящим (имя хоста / модель)
+        if (d.name == d.host || d.name.startsWith('ip:') || (isGenericDeviceName(d.name) && h.bestName != h.ip && !isGenericDeviceName(h.bestName))) {
+          d.name = h.bestName;
+        }
       }
       d.mac ??= h.mac;
       if (h.hostname != null) d.hostname = h.hostname;

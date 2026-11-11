@@ -13,6 +13,15 @@ class SsdpInfo {
   String? deviceType;
   String? server;
   String? location;
+  final Set<String> locations = {}; // у роутера несколько UPnP-устройств (WPS, шлюз, медиасервер…)
+}
+
+/// Имена, которые ничего не говорят о самом устройстве (так роутеры называют служебные UPnP-блоки).
+bool isGenericDeviceName(String? n) {
+  if (n == null) return true;
+  final t = n.trim().toLowerCase();
+  if (t.isEmpty) return true;
+  return RegExp(r'wps|access point|accesspoint|wfa|internetgateway|gateway device|wan ?(ip|ppp)|wanconnection|wandevice|landevice|layer3|root ?device|basic ?device|upnp|media ?server|dlna|unknown|^router$').hasMatch(t);
 }
 
 class ScanHit {
@@ -28,7 +37,10 @@ class ScanHit {
     final n = nano?['name']?.toString();
     if (n != null && n.isNotEmpty) return n;
     final f = ssdp?.friendlyName;
-    if (f != null && f.isNotEmpty) return f;
+    if (f != null && f.isNotEmpty && !isGenericDeviceName(f)) return f;
+    if (hostname != null && hostname!.isNotEmpty && !isGenericDeviceName(hostname)) return hostname!;
+    final m = ssdp?.modelName;
+    if (m != null && m.isNotEmpty && !isGenericDeviceName(m)) return m;
     if (hostname != null && hostname!.isNotEmpty) return hostname!;
     return ip;
   }
@@ -196,37 +208,47 @@ class Scanner {
       if (i <= 0) continue;
       final k = line.substring(0, i).trim().toLowerCase();
       final v = line.substring(i + 1).trim();
-      if (k == 'location') info.location ??= v;
+      if (k == 'location') {
+        info.location ??= v;
+        if (info.locations.length < 6) info.locations.add(v);
+      }
       if (k == 'server') info.server ??= v;
       if (k == 'st' && (info.deviceType == null || v.contains('device'))) info.deviceType = v;
     }
   }
 
   Future<void> _describe(String ip, SsdpInfo info) async {
-    final loc = info.location;
-    if (loc == null) return;
-    try {
-      final uri = Uri.parse(loc);
-      if (uri.host != ip) return; // не ходим на чужие адреса
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    final locs = info.locations.isNotEmpty ? info.locations.toList() : (info.location != null ? [info.location!] : <String>[]);
+    for (final loc in locs) {
       try {
-        final req = await client.getUrl(uri).timeout(const Duration(seconds: 2));
-        final res = await req.close().timeout(const Duration(seconds: 2));
-        final body = await utf8.decodeStream(res).timeout(const Duration(seconds: 2));
-        String? tag(String t) {
-          final m = RegExp('<$t>(.*?)</$t>', dotAll: true).firstMatch(body);
-          return m?.group(1)?.trim();
-        }
+        final uri = Uri.parse(loc);
+        if (uri.host != ip) continue; // не ходим на чужие адреса
+        final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+        try {
+          final req = await client.getUrl(uri).timeout(const Duration(seconds: 2));
+          final res = await req.close().timeout(const Duration(seconds: 2));
+          final body = await utf8.decodeStream(res).timeout(const Duration(seconds: 2));
+          String? tag(String t) {
+            final m = RegExp('<$t>(.*?)</$t>', dotAll: true).firstMatch(body);
+            return m?.group(1)?.trim();
+          }
 
-        info.friendlyName = tag('friendlyName');
-        info.manufacturer = tag('manufacturer');
-        info.modelName = tag('modelName');
-        final dt = tag('deviceType');
-        if (dt != null) info.deviceType = dt;
-      } finally {
-        client.close(force: true);
-      }
-    } catch (_) {}
+          final fn = tag('friendlyName');
+          final mf = tag('manufacturer');
+          final md = tag('modelName');
+          final dt = tag('deviceType');
+          // берём понятное имя; служебные («WPS Access Point») пропускаем, если есть лучше
+          if (info.friendlyName == null || (isGenericDeviceName(info.friendlyName) && !isGenericDeviceName(fn))) {
+            if (fn != null && fn.isNotEmpty) info.friendlyName = fn;
+          }
+          info.manufacturer ??= mf;
+          if (info.modelName == null || (isGenericDeviceName(info.modelName) && !isGenericDeviceName(md))) info.modelName = md ?? info.modelName;
+          if (dt != null && (info.deviceType == null || dt.toLowerCase().contains('internetgateway'))) info.deviceType = dt;
+        } finally {
+          client.close(force: true);
+        }
+      } catch (_) {}
+    }
   }
 
   static DeviceKind classify(ScanHit h) {

@@ -26,15 +26,33 @@ class _FtpConn {
     );
   }
 
+  String? _slot;
+
   static Future<_FtpConn> open(String host, int port, String user, String pass) async {
-    final s = await lanConnect(host, port, timeout: const Duration(seconds: 5));
-    final c = _FtpConn._(s, host);
+    final slot = 'ftp|$host';
+    await HostSlots.acquire(slot);
+    Socket s;
     try {
-      final hello = await c._read();
-      if (hello.code >= 400) throw FsError('FTP: сервер отказал (${hello.code})', retry: true);
+      s = await lanConnect(host, port, timeout: const Duration(seconds: 5));
+    } catch (_) {
+      HostSlots.release(slot);
+      rethrow;
+    }
+    final c = _FtpConn._(s, host);
+    c._slot = slot;
+    try {
+      var hello = await c._read();
+      if (hello.code == 120) hello = await c._read(); // «сервер будет готов через N минут» - ждём настоящее приветствие
+      if (hello.code >= 400) throw FsError('FTP: сервер отказал (${_short(hello.text)})', retry: true);
       var r = await c.cmd('USER $user');
       if (r.code == 331 || r.code == 332) r = await c.cmd('PASS $pass');
-      if (r.code != 230 && r.code != 202) throw FsError('FTP: неверный логин или пароль');
+      if (r.code != 230 && r.code != 202) {
+        throw FsError('FTP: неверный логин или пароль для «$user» (${_short(r.text)})');
+      }
+      // русские имена файлов: просим сервер работать в UTF-8 (если не умеет - не страшно)
+      try {
+        await c.cmd('OPTS UTF8 ON');
+      } catch (_) {}
       await c.cmd('TYPE I');
       return c;
     } catch (e) {
@@ -42,6 +60,13 @@ class _FtpConn {
       rethrow;
     }
   }
+
+  static String _short(String t) {
+    final one = t.replaceAll('\n', ' ').trim();
+    return one.length > 90 ? '${one.substring(0, 90)}…' : one;
+  }
+
+  bool _noEpsv = false;
 
   Future<_Reply> _read() async {
     String? first;
@@ -65,22 +90,42 @@ class _FtpConn {
     return _read();
   }
 
+  /// Канал данных: сначала EPSV, если не вышло (роутеры часто с ним дружат хуже) - обычный PASV.
   Future<Socket> dataSocket() async {
-    var r = await cmd('EPSV');
-    int? port;
-    if (r.code == 229) {
-      final m = RegExp(r'\|\|\|(\d+)\|').firstMatch(r.text);
-      if (m != null) port = int.parse(m.group(1)!);
+    Object? lastErr;
+    if (!_noEpsv) {
+      try {
+        final r = await cmd('EPSV');
+        if (r.code == 229) {
+          final m = RegExp(r'\|\|\|(\d+)\|').firstMatch(r.text);
+          if (m != null) {
+            // всегда подключаемся к адресу управляющего соединения (серверы за NAT врут в ответе)
+            return await lanConnect(host, int.parse(m.group(1)!), timeout: const Duration(seconds: 6));
+          }
+        }
+        _noEpsv = true;
+      } catch (e) {
+        lastErr = e;
+        _noEpsv = true;
+      }
     }
-    if (port == null) {
-      r = await cmd('PASV');
-      if (r.code != 227) throw FsError('FTP: сервер не поддерживает пассивный режим');
-      final m = RegExp(r'(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)').firstMatch(r.text);
-      if (m == null) throw FsError('FTP: странный ответ PASV');
-      port = int.parse(m.group(5)!) * 256 + int.parse(m.group(6)!);
+    final r = await cmd('PASV');
+    if (r.code != 227) {
+      throw FsError('FTP: сервер не поддерживает пассивный режим (${_short(r.text)})', retry: lastErr != null);
     }
-    // всегда подключаемся к адресу управляющего соединения (серверы за NAT врут в PASV)
-    return lanConnect(host, port, timeout: const Duration(seconds: 6));
+    final m = RegExp(r'(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)').firstMatch(r.text);
+    if (m == null) throw FsError('FTP: странный ответ PASV (${_short(r.text)})');
+    final port = int.parse(m.group(5)!) * 256 + int.parse(m.group(6)!);
+    try {
+      return await lanConnect(host, port, timeout: const Duration(seconds: 6));
+    } catch (e) {
+      final ip = '${m.group(1)}.${m.group(2)}.${m.group(3)}.${m.group(4)}';
+      if (ip != host && !ip.startsWith('0.')) {
+        // некоторые серверы называют правильный адрес только здесь
+        return await lanConnect(ip, port, timeout: const Duration(seconds: 6));
+      }
+      throw FsError('FTP: не удалось открыть канал данных (порт $port). Проверьте настройки FTP на роутере.', retry: true);
+    }
   }
 
   void close() {
@@ -90,6 +135,9 @@ class _FtpConn {
     try {
       sock.destroy();
     } catch (_) {}
+    final k = _slot;
+    _slot = null;
+    if (k != null) HostSlots.release(k);
   }
 }
 
@@ -138,7 +186,7 @@ class FtpVfs extends RemoteVfs {
     final dir = path.isEmpty ? '/' : path;
     return _with((c) async {
       final cw = await c.cmd('CWD $dir');
-      if (cw.code >= 400) throw FsError('FTP: нет такой папки или нет доступа');
+      if (cw.code >= 400) throw FsError('FTP: нет такой папки или нет доступа (${_FtpConn._short(cw.text)})');
       var raw = await _listRaw(c, 'MLSD');
       var mlsd = true;
       if (raw == null) {

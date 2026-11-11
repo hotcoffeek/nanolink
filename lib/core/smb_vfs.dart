@@ -14,6 +14,13 @@ class SmbVfs extends RemoteVfs {
   SmbVfs(Device dev, Hub hub) : super(dev, hub);
 
   SmbConnect? _c;
+  String? _slot; // ключ занятого «места» на хосте (освобождается при закрытии соединения)
+
+  void _freeSlot() {
+    final k = _slot;
+    _slot = null;
+    if (k != null) HostSlots.release(k);
+  }
 
   @override
   String get title => dev.title;
@@ -25,6 +32,7 @@ class SmbVfs extends RemoteVfs {
     if (c != null) {
       unawaited(c.close().catchError((Object _) {}));
     }
+    _freeSlot();
   }
 
   @override
@@ -39,6 +47,9 @@ class SmbVfs extends RemoteVfs {
     final user = dev.str('smb', 'user');
     final pass = dev.str('smb', 'pass') ?? '';
     SmbConnect n;
+    final slotKey = 'smb|${hostOrThrow}';
+    await HostSlots.acquire(slotKey);
+    _slot = slotKey;
     try {
       n = await SmbConnect.connectAuth(
         host: hostOrThrow,
@@ -47,11 +58,14 @@ class SmbVfs extends RemoteVfs {
         password: pass,
         onDisconnect: (_) {
           _c = null;
+          _freeSlot();
         },
       ).timeout(const Duration(seconds: 12));
     } on TimeoutException {
+      _freeSlot();
       rethrow;
     } catch (e) {
+      _freeSlot();
       final t = e.toString().toLowerCase();
       if (t.contains('logon') || t.contains('denied') || t.contains('password') || t.contains('auth')) {
         throw FsError('SMB: неверный логин или пароль');
