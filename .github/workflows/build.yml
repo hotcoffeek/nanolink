@@ -28,6 +28,13 @@ jobs:
           rm -rf lib && cp -r /tmp/keep/lib lib && cp /tmp/keep/pubspec.yaml pubspec.yaml
           rm -rf test
       - run: flutter pub get
+      - name: Patch dartssh2 for new Dart
+        shell: bash
+        run: |
+          F=$(find "$HOME/.pub-cache" "$LOCALAPPDATA/Pub/Cache" "$PUB_CACHE" -path '*dartssh2-2.14.0/lib/src/sftp/sftp_client.dart' 2>/dev/null | head -1)
+          echo "patching $F"
+          sed -i -E 's/(if \(bytess?Recieved >= length)\) \{/\1!) {/' "$F"
+          grep -n "Recieved >= length" "$F"
       - name: Set window title
         run: |
           sed -i 's/L"nanolink"/L"NanoLink"/g' windows/runner/main.cpp || true
@@ -141,6 +148,12 @@ jobs:
           rm -rf lib && cp -r /tmp/keep/lib lib && cp /tmp/keep/pubspec.yaml pubspec.yaml
           rm -rf test
       - run: flutter pub get
+      - name: Patch dartssh2 for new Dart
+        run: |
+          F=$(find "$HOME/.pub-cache" "$LOCALAPPDATA/Pub/Cache" "$PUB_CACHE" -path '*dartssh2-2.14.0/lib/src/sftp/sftp_client.dart' 2>/dev/null | head -1)
+          echo "patching $F"
+          sed -i -E 's/(if \(bytess?Recieved >= length)\) \{/\1!) {/' "$F"
+          grep -n "Recieved >= length" "$F"
       - run: flutter build linux --release
       - run: tar -czf NanoLink-linux.tar.gz -C build/linux/x64/release/bundle .
       - uses: actions/upload-artifact@v4
