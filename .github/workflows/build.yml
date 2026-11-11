@@ -64,6 +64,16 @@ jobs:
           rm -rf lib && cp -r /tmp/keep/lib lib && cp /tmp/keep/pubspec.yaml pubspec.yaml
           rm -rf test
           cp -r overlay/android/. android/
+      - name: Add jcifs-ng (SMB library for SmbBridge.kt)
+        run: |
+          if ! grep -rq "jcifs" android/app/build.gradle* ; then
+            if [ -f android/app/build.gradle.kts ]; then
+              printf '\ndependencies {\n    implementation("eu.agno3.jcifs:jcifs-ng:2.1.10")\n}\n' >> android/app/build.gradle.kts
+            else
+              printf '\ndependencies {\n    implementation "eu.agno3.jcifs:jcifs-ng:2.1.10"\n}\n' >> android/app/build.gradle
+            fi
+          fi
+          tail -5 android/app/build.gradle*
       - run: flutter pub get
       - name: Patch dartssh2 for new Dart
         run: |
