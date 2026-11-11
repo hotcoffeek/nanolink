@@ -803,6 +803,12 @@ class _ErrorView extends StatelessWidget {
                   icon: Icons.swap_horiz_rounded,
                   onTap: () => connectFlow(context, s, pane, pane.dev!, proto: alt),
                 ),
+            if (pane.dev != null)
+              SoftButton(
+                label: tr('Диагностика', 'Diagnostics'),
+                icon: Icons.troubleshoot_rounded,
+                onTap: () => showDiagnose(context, pane.dev!),
+              ),
             if (proto != null && proto != 'nano' && pane.dev != null)
               SoftButton(
                 label: tr('Логин и пароль', 'Login & password'),

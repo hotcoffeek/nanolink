@@ -370,3 +370,61 @@ class FtpVfs extends RemoteVfs {
     }
   }
 }
+
+/// Пошаговая проверка FTP для экрана «Диагностика»: что именно отвечает сервер на каждом шаге.
+Future<List<String>> ftpDiagnose(Device d) async {
+  final out = <String>[];
+  final host = d.host ?? '';
+  final port = d.portOf('ftp', 21);
+  final u = d.str('ftp', 'user');
+  final user = (u == null || u.isEmpty) ? 'anonymous' : u;
+  final pass = d.str('ftp', 'pass') ?? 'nanolink@local';
+  out.add('FTP  $host:$port, логин «$user»');
+  _FtpConn? c;
+  try {
+    final s = await lanConnect(host, port, timeout: const Duration(seconds: 5));
+    c = _FtpConn._(s, host);
+    out.add('✓ соединение открыто');
+    var r = await c._read();
+    out.add('приветствие: ${_FtpConn._short(r.text)}');
+    r = await c.cmd('USER $user');
+    out.add('USER → ${_FtpConn._short(r.text)}');
+    if (r.code == 331 || r.code == 332) {
+      r = await c.cmd('PASS $pass');
+      out.add('PASS •••• → ${_FtpConn._short(r.text)}');
+    }
+    if (r.code != 230 && r.code != 202) {
+      out.add('✗ вход не удался: сервер не принял логин/пароль');
+      return out;
+    }
+    out.add('✓ вход выполнен');
+    final t = await c.cmd('TYPE I');
+    out.add('TYPE I → ${_FtpConn._short(t.text)}');
+    try {
+      final ds = await c.dataSocket();
+      out.add('✓ канал данных открыт (${c._noEpsv ? 'PASV' : 'EPSV'})');
+      final l = await c.cmd('LIST');
+      if (l.code >= 400) {
+        out.add('✗ LIST → ${_FtpConn._short(l.text)}');
+      } else {
+        final text = await const Utf8Codec(allowMalformed: true).decodeStream(ds).timeout(const Duration(seconds: 10));
+        try {
+          await c._read();
+        } catch (_) {}
+        final lines = const LineSplitter().convert(text).where((x) => x.trim().isNotEmpty).toList();
+        out.add('✓ список получен: ${lines.length} строк');
+        for (final x in lines.take(4)) {
+          out.add('   $x');
+        }
+      }
+      ds.destroy();
+    } catch (e) {
+      out.add('✗ канал данных: $e');
+    }
+  } catch (e) {
+    out.add('✗ ${e.runtimeType}: $e');
+  } finally {
+    c?.close();
+  }
+  return out;
+}

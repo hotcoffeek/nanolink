@@ -51,16 +51,24 @@ class SmbVfs extends RemoteVfs {
     await HostSlots.acquire(slotKey);
     _slot = slotKey;
     try {
-      n = await SmbConnect.connectAuth(
-        host: hostOrThrow,
-        domain: '',
-        username: (user == null || user.isEmpty) ? 'guest' : user,
-        password: pass,
-        onDisconnect: (_) {
-          _c = null;
-          _freeSlot();
-        },
-      ).timeout(const Duration(seconds: 12));
+      Future<SmbConnect> attempt(String domain) => SmbConnect.connectAuth(
+            host: hostOrThrow,
+            domain: domain,
+            username: (user == null || user.isEmpty) ? 'guest' : user,
+            password: pass,
+            onDisconnect: (_) {
+              _c = null;
+              _freeSlot();
+            },
+          ).timeout(const Duration(seconds: 12));
+      try {
+        n = await attempt('');
+      } on TimeoutException {
+        rethrow;
+      } catch (_) {
+        // у роутеров/NAS учётка часто привязана к рабочей группе - пробуем WORKGROUP
+        n = await attempt('WORKGROUP');
+      }
     } on TimeoutException {
       _freeSlot();
       rethrow;
@@ -187,4 +195,37 @@ class SmbVfs extends RemoteVfs {
 
   @override
   Future<void> close() async => resetConn();
+}
+
+/// Пошаговая проверка SMB для экрана «Диагностика».
+Future<List<String>> smbDiagnose(Device d) async {
+  final out = <String>[];
+  final host = d.host ?? '';
+  final u = d.str('smb', 'user');
+  final user = (u == null || u.isEmpty) ? 'guest' : u;
+  final pass = d.str('smb', 'pass') ?? '';
+  out.add('SMB  $host:445, логин «$user»${pass.isEmpty ? ', пароль пустой' : ''}');
+  for (final domain in const ['', 'WORKGROUP']) {
+    SmbConnect? c;
+    try {
+      c = await SmbConnect.connectAuth(host: host, domain: domain, username: user, password: pass).timeout(const Duration(seconds: 12));
+      out.add('✓ вход выполнен (домен «${domain.isEmpty ? 'по умолчанию' : domain}»)');
+      try {
+        final shares = await c.listShares().timeout(const Duration(seconds: 15));
+        out.add('✓ общие ресурсы: ${shares.map((x) => x.name).join(', ')}');
+      } catch (e) {
+        out.add('✗ список ресурсов: ${e.runtimeType}: $e');
+      }
+      await c.close().catchError((Object _) {});
+      return out;
+    } catch (e) {
+      var t = '${e.runtimeType}: $e';
+      if (t.length > 220) t = '${t.substring(0, 220)}…';
+      out.add('✗ домен «${domain.isEmpty ? 'по умолчанию' : domain}»: $t');
+      try {
+        await c?.close();
+      } catch (_) {}
+    }
+  }
+  return out;
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/diagnose.dart';
 import '../core/i18n.dart';
 import '../core/models.dart';
 import '../core/pane.dart';
@@ -378,6 +379,45 @@ Future<void> _showRecv(BuildContext ctx, AppState s, RecvRequest req) async {
   );
 }
 
+
+/// «Диагностика»: проверяет порты и вход по FTP/SMB и показывает точные ответы устройства.
+Future<void> showDiagnose(BuildContext ctx, Device d) {
+  final fut = diagnoseDevice(d);
+  return showDialog<void>(
+    context: ctx,
+    builder: (dctx) => AlertDialog(
+      title: Text(tr('Диагностика · ${d.title}', 'Diagnostics · ${d.title}')),
+      content: SizedBox(
+        width: 420,
+        child: FutureBuilder<String>(
+          future: fut,
+          builder: (_, snap) {
+            if (!snap.hasData) {
+              return Column(mainAxisSize: MainAxisSize.min, children: [
+                const SizedBox(height: 10),
+                const CircularProgressIndicator(),
+                const SizedBox(height: 14),
+                Text(tr('Проверяем порты, FTP и SMB…', 'Checking ports, FTP and SMB…')),
+              ]);
+            }
+            return SingleChildScrollView(child: SelectableText(snap.data!, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)));
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () async {
+            final text = await fut;
+            await Clipboard.setData(ClipboardData(text: text));
+            if (dctx.mounted) toast(dctx, tr('Скопировано', 'Copied'));
+          },
+          child: Text(tr('Копировать', 'Copy')),
+        ),
+        FilledButton(onPressed: () => Navigator.pop(dctx), child: Text(tr('Закрыть', 'Close'))),
+      ],
+    ),
+  );
+}
 
 /// Ручное подключение: адрес, протокол, порт, логин и пароль (FTP / SFTP / SMB / NanoLink).
 Future<void> showManualAddSheet(BuildContext ctx, AppState s, {required void Function(Device d, String? proto) onOpen}) {

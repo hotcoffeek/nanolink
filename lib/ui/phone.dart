@@ -245,6 +245,16 @@ void showDeviceSheet(
                 browse(ask: true);
               },
             ),
+          if (!d.isSelf)
+            ListTile(
+              leading: const Icon(Icons.troubleshoot_rounded),
+              title: Text(tr('Диагностика подключения', 'Connection diagnostics')),
+              subtitle: Text(tr('Проверит порты, FTP и SMB и покажет ответы устройства', 'Checks ports, FTP and SMB and shows the device replies')),
+              onTap: () {
+                Navigator.pop(sheet);
+                showDiagnose(context, d);
+              },
+            ),
           if (dest.isNotEmpty)
             ListTile(
               leading: const Icon(Icons.restart_alt_rounded),
