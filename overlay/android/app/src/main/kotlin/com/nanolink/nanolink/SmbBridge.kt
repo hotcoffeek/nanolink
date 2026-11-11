@@ -10,8 +10,9 @@ import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
 import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbAuthException
-import jcifs.smb.SmbFile
-import jcifs.smb.SmbRandomAccessFile
+import jcifs.SmbResource
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.Properties
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -26,7 +27,7 @@ object SmbBridge {
     private val pool = Executors.newCachedThreadPool()
     private val main = Handler(Looper.getMainLooper())
     private val contexts = ConcurrentHashMap<String, CIFSContext>()
-    private val handles = ConcurrentHashMap<Int, SmbRandomAccessFile>()
+    private val handles = ConcurrentHashMap<Int, Any>()
     private val nextId = AtomicInteger(1)
 
     fun register(messenger: BinaryMessenger) {
@@ -85,16 +86,16 @@ object SmbBridge {
         }
     }
 
-    /** Файл/папка по пути "/шара/папка/имя". Собираем по частям - так имена с пробелами и # не ломают адрес. */
-    private fun file(call: MethodCall, path: String, dir: Boolean): SmbFile {
+    /** Файл/папка по пути "/шара/папка/имя". Собираем по частям через resolve - имена с пробелами и # не ломают адрес. */
+    private fun file(call: MethodCall, path: String, dir: Boolean): SmbResource {
         val host = call.argument<String>("host") ?: ""
         val port = call.argument<Int>("port") ?: 445
         val root = "smb://" + host + (if (port != 445) ":$port" else "") + "/"
-        var f = SmbFile(root, context(call))
+        var f: SmbResource = context(call).get(root)
         val parts = path.split("/").filter { it.isNotEmpty() }
         for (i in parts.indices) {
             val last = i == parts.size - 1
-            f = SmbFile(f, if (last && !dir) parts[i] else parts[i] + "/")
+            f = f.resolve(if (last && !dir) parts[i] else parts[i] + "/")
         }
         return f
     }
@@ -112,31 +113,39 @@ object SmbBridge {
                 val out = ArrayList<Map<String, Any>>()
                 val isRoot = path.isEmpty() || path == "/"
                 val dir = file(call, path, true)
-                val items = dir.listFiles() ?: arrayOf<SmbFile>()
-                for (f in items) {
-                    val name = cleanName(f.name)
-                    if (name.isEmpty() || name == "." || name == "..") continue
-                    if (isRoot) {
-                        if (name.endsWith("$")) continue
-                        var share = true
+                val it = dir.children()
+                try {
+                    while (it.hasNext()) {
+                        val f = it.next()
+                        val name = cleanName(f.name)
+                        if (name.isEmpty() || name == "." || name == "..") continue
+                        if (isRoot) {
+                            if (name.endsWith("$")) continue
+                            var share = true
+                            try {
+                                share = f.type == 8
+                            } catch (e: Throwable) {
+                            }
+                            if (!share) continue
+                            out.add(mapOf("name" to name, "dir" to true, "size" to 0L, "mtime" to 0L))
+                            continue
+                        }
+                        var isDir = false
+                        var size = 0L
+                        var mtime = 0L
                         try {
-                            share = f.type == SmbFile.TYPE_SHARE
+                            isDir = f.isDirectory
+                            if (!isDir) size = f.length()
+                            mtime = f.lastModified()
                         } catch (e: Throwable) {
                         }
-                        if (!share) continue
-                        out.add(mapOf("name" to name, "dir" to true, "size" to 0L, "mtime" to 0L))
-                        continue
+                        out.add(mapOf("name" to name, "dir" to isDir, "size" to size, "mtime" to mtime))
                     }
-                    var isDir = false
-                    var size = 0L
-                    var mtime = 0L
+                } finally {
                     try {
-                        isDir = f.isDirectory
-                        if (!isDir) size = f.length()
-                        mtime = f.lastModified()
+                        it.close()
                     } catch (e: Throwable) {
                     }
-                    out.add(mapOf("name" to name, "dir" to isDir, "size" to size, "mtime" to mtime))
                 }
                 return out
             }
@@ -169,25 +178,30 @@ object SmbBridge {
                 val append = call.argument<Boolean>("append") ?: false
                 val offset = (call.argument<Number>("offset") ?: 0).toLong()
                 val f = file(call, path, false)
-                if (write && !append && f.exists()) f.delete()
-                val raf = SmbRandomAccessFile(f, if (write) "rw" else "r")
-                if (write && append) {
-                    raf.seek(raf.length())
-                } else if (offset > 0) {
-                    raf.seek(offset)
-                }
                 val id = nextId.getAndIncrement()
-                handles[id] = raf
+                if (write) {
+                    if (!append && f.exists()) f.delete()
+                    handles[id] = f.openOutputStream(append)
+                } else {
+                    val ins = f.openInputStream()
+                    var left = offset
+                    while (left > 0) {
+                        val k = ins.skip(left)
+                        if (k <= 0) break
+                        left -= k
+                    }
+                    handles[id] = ins
+                }
                 return id
             }
             "read" -> {
                 val id = call.argument<Int>("id") ?: 0
                 val n = call.argument<Int>("n") ?: 262144
-                val raf = handles[id] ?: throw IllegalStateException("файл закрыт")
+                val ins = handles[id] as? InputStream ?: throw IllegalStateException("файл закрыт")
                 val buf = ByteArray(n)
                 var got = 0
                 while (got < n) {
-                    val r = raf.read(buf, got, n - got)
+                    val r = ins.read(buf, got, n - got)
                     if (r <= 0) break
                     got += r
                 }
@@ -196,15 +210,16 @@ object SmbBridge {
             "write" -> {
                 val id = call.argument<Int>("id") ?: 0
                 val data = call.argument<ByteArray>("data") ?: ByteArray(0)
-                val raf = handles[id] ?: throw IllegalStateException("файл закрыт")
-                raf.write(data, 0, data.size)
+                val os = handles[id] as? OutputStream ?: throw IllegalStateException("файл закрыт")
+                os.write(data, 0, data.size)
                 return true
             }
             "close" -> {
                 val id = call.argument<Int>("id") ?: 0
-                val raf = handles.remove(id)
+                val h = handles.remove(id)
                 try {
-                    raf?.close()
+                    if (h is InputStream) h.close()
+                    if (h is OutputStream) h.close()
                 } catch (e: Throwable) {
                 }
                 return true
