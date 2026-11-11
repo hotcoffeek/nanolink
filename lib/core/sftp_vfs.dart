@@ -37,8 +37,17 @@ class SftpVfs extends RemoteVfs {
   Future<SftpClient> _ensure() async {
     final s = _sftp;
     if (s != null) return s;
-    final user = dev.str('sftp', 'user') ?? 'deck';
-    final pass = dev.str('sftp', 'pass') ?? '';
+    var user = dev.str('sftp', 'user');
+    var pass = dev.str('sftp', 'pass') ?? '';
+    if (user == null || user.isEmpty) {
+      // своих данных для SFTP нет - пробуем те, что введены для SMB/FTP (у роутеров одна учётка)
+      final su = dev.str('smb', 'user') ?? dev.str('ftp', 'user');
+      if (su != null && su.isNotEmpty && su != 'guest' && su != 'anonymous') {
+        user = su;
+        pass = dev.str('smb', 'pass') ?? dev.str('ftp', 'pass') ?? '';
+      }
+    }
+    user = (user == null || user.isEmpty) ? 'deck' : user;
     final socket = await SSHSocket.connect(hostOrThrow, dev.portOf('sftp', 22)).timeout(const Duration(seconds: 6));
     final client = SSHClient(
       socket,
