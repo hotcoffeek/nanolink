@@ -32,8 +32,9 @@ class KeepAliveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val bind = intent?.getBooleanExtra("bind", true) ?: true
+        val full = intent?.getBooleanExtra("full", true) ?: true
         startAsForeground()
-        acquireLocks()
+        if (full) acquireLocks() else releaseLocks()
         if (bind) bindToLan() else unbind()
         return START_STICKY
     }
@@ -122,6 +123,18 @@ class KeepAliveService : Service() {
             cm.bindProcessToNetwork(null)
         } catch (_: Exception) {
         }
+    }
+
+    private fun releaseLocks() {
+        try { wifiLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
+        try { wifiLock2?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
+        try { wakeLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
+        wifiLock = null; wifiLock2 = null; wakeLock = null
+        try {
+            // в лёгком режиме остаётся только приём мультикаста для поиска устройств
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            if (multicastLock == null) multicastLock = wm.createMulticastLock("nanolink:multicast").apply { setReferenceCounted(false); acquire() }
+        } catch (_: Exception) {}
     }
 
     override fun onDestroy() {

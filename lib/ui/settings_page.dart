@@ -139,6 +139,12 @@ class SettingsPage extends StatelessWidget {
                     trailing: Switch(value: s.settings.bindWifi, onChanged: s.setBindWifi),
                   ),
                   _Row(
+                    title: tr('Фоновый режим', 'Background mode'),
+                    subtitle: tr('Выключено: приложение почти не тратит батарею, связь работает пока оно открыто или идёт передача. Включите, если нужно принимать файлы при выключенном экране - батарея будет расходоваться заметнее.',
+                        'Off: almost no battery use; connection works while the app is open or a transfer runs. Turn on to receive files with the screen off - uses more battery.'),
+                    trailing: Switch(value: s.settings.bgMode, onChanged: s.setBgMode),
+                  ),
+                  _Row(
                     title: tr('Доступ ко всем файлам', 'All files access'),
                     subtitle: s.allFilesOk ? tr('Выдан', 'Granted') : tr('Не выдан - проводник увидит не всё', 'Not granted - explorer will miss files'),
                     trailing: s.allFilesOk

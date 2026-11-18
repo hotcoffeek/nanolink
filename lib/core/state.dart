@@ -219,11 +219,9 @@ class AppState extends ChangeNotifier implements Hub {
       Native.listenShared(pullShared);
       Native.onRecvAnswer = answerRecv;
       TransferEngine.onJobDone = () => PaneController.fsChanged.value++;
-      unawaited(Native.startKeepAlive(bindWifi: settings.bindWifi));
-      unawaited(applyBind());
+      transfers.addListener(applyPower);
+      unawaited(applyPower());
       unawaited(Native.requestNotifications());
-      // Один раз просим не усыплять приложение: иначе при выключенном экране телефон пропадает из сети.
-      unawaited(Future<void>.delayed(const Duration(seconds: 8), () => Native.requestBatteryExemption(once: true)));
     }
 
     nics = await localNics(fresh: true);
@@ -650,9 +648,47 @@ class AppState extends ChangeNotifier implements Hub {
       final h = d.host;
       if (h != null && isOverlayIp(h)) want = false;
     }
-    if (want == _lastBind) return;
+    if (want == _lastBind && _lastPower != null) return;
     _lastBind = want;
-    await Native.startKeepAlive(bindWifi: want);
+    _lastPower = null;
+    await applyPower();
+  }
+
+  String? _lastPower;
+
+  /// Питание службы связи: «полный» (замки CPU/Wi-Fi) только в фоновом режиме или во время передачи,
+  /// «лёгкий» - пока приложение открыто, иначе служба остановлена и батарея не тратится.
+  Future<void> applyPower() async {
+    if (!Platform.isAndroid) return;
+    final busy = transfers.activeCount > 0;
+    final mode = (settings.bgMode || busy) ? 'full' : (foreground ? 'light' : 'off');
+    final want = overlayWant();
+    final key = '$mode|$want';
+    if (key == _lastPower) return;
+    _lastPower = key;
+    _lastBind = want;
+    if (mode == 'off') {
+      await Native.stopKeepAlive();
+    } else {
+      await Native.startKeepAlive(bindWifi: want, full: mode == 'full');
+    }
+  }
+
+  bool overlayWant() {
+    var want = settings.bindWifi;
+    for (final d in devices) {
+      final h = d.host;
+      if (h != null && isOverlayIp(h)) want = false;
+    }
+    return want;
+  }
+
+  Future<void> setBgMode(bool v) async {
+    settings.bgMode = v;
+    saveSoon();
+    await applyPower();
+    if (v) unawaited(Native.requestBatteryExemption());
+    notifyListeners();
   }
 
   // --- Принятые файлы и «Поделиться» ---------------------------------

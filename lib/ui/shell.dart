@@ -46,6 +46,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _s?.foreground = state == AppLifecycleState.resumed;
+    _s?.applyPower();
     PaneController.appActive = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) PaneController.fsChanged.value++;
     if (state == AppLifecycleState.resumed) {

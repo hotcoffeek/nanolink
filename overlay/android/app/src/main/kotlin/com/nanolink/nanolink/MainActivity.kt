@@ -151,7 +151,8 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "startKeepAlive" -> {
                         val bind = call.argument<Boolean>("bind") ?: true
-                        val i = Intent(this, KeepAliveService::class.java).putExtra("bind", bind)
+                        val full = call.argument<Boolean>("full") ?: true
+                        val i = Intent(this, KeepAliveService::class.java).putExtra("bind", bind).putExtra("full", full)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
                         result.success(true)
                     }

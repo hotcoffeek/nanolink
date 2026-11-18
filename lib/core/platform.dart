@@ -16,8 +16,9 @@ class Native {
     }
   }
 
-  static Future<void> startKeepAlive({bool bindWifi = true}) async {
-    await _call<bool>('startKeepAlive', {'bind': bindWifi});
+  /// full=false: лёгкий режим (только привязка к сети и приём устройств), без замков CPU и Wi-Fi.
+  static Future<void> startKeepAlive({bool bindWifi = true, bool full = true}) async {
+    await _call<bool>('startKeepAlive', {'bind': bindWifi, 'full': full});
   }
 
   static Future<void> stopKeepAlive() async {

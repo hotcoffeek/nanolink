@@ -43,6 +43,7 @@ class Settings {
   bool allowWrite = true;
   String conflict = 'rename'; // rename | overwrite | skip
   bool bindWifi = true;
+  bool bgMode = false; // фоновый режим: держать связь при выключенном экране (тратит батарею)
   bool serverOn = true;
   bool autoPair = true;
   bool askReceive = true;
@@ -59,6 +60,7 @@ class Settings {
         'allowWrite': allowWrite,
         'conflict': conflict,
         'bindWifi': bindWifi,
+        'bgMode': bgMode,
         'serverOn': serverOn,
         'autoPair': autoPair,
         'askReceive': askReceive,
@@ -77,6 +79,7 @@ class Settings {
     allowWrite = (j['allowWrite'] ?? allowWrite) as bool;
     conflict = (j['conflict'] ?? conflict).toString();
     bindWifi = (j['bindWifi'] ?? bindWifi) as bool;
+    bgMode = (j['bgMode'] ?? bgMode) as bool;
     serverOn = (j['serverOn'] ?? serverOn) as bool;
     autoPair = (j['autoPair'] ?? autoPair) as bool;
     askReceive = (j['askReceive'] ?? askReceive) as bool;
